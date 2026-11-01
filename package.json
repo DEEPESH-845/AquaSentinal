@@ -1,0 +1,45 @@
+{
+  "name": "aquasentinal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "sim:check": "tsx lib/sim/selfcheck.ts",
+    "fixtures": "tsx scripts/gen-fixtures.ts",
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:update": "playwright test --update-snapshots",
+    "dev:all": "node scripts/dev.mjs",
+    "backend": "cd backend && .venv/bin/uvicorn app.main:app --port 8000",
+    "backend:test": "cd backend && .venv/bin/python -m pytest -q"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.40.0",
+    "gsap": "^3.15.0",
+    "lucide-react": "^1.16.0",
+    "next": "^16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "three": "^0.184.0",
+    "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.184.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5"
+  }
+}
