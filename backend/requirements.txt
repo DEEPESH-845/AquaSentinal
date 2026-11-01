@@ -1,0 +1,11 @@
+# AquaSentinal backend. Python 3.11+ (developed on 3.14).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+pydantic>=2.7
+python-multipart>=0.0.9
+numpy>=1.26
+opencv-python-headless>=4.9
+pyserial>=3.5
+# Official Meta SAM output parser (https://dev.meta.ai/docs/sam/client-libraries)
+meta-sam-parser>=0.1.0
