@@ -1,0 +1,10 @@
+{
+  "$comment": "Adaptive perception thresholds shared by the browser twin (lib/sim/perception.ts) and the backend executor (backend/app/perception/controller.py). Visibility is a 0..1 estimate, never a calibrated turbidity measurement.",
+  "degradedVisibility": 0.75,
+  "unsafeVisibility": 0.45,
+  "reducedSpeedFraction": 0.35,
+  "resumeAfterS": 2.0,
+  "operatorTimeoutS": 15.0,
+  "maxReobservations": 4,
+  "reobserveRadiusCm": 5.0
+}

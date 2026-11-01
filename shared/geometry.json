@@ -1,0 +1,5 @@
+{
+  "$comment": "Single source of truth for physical geometry, read by lib/sim/constants.ts and backend/app/geometry.py. Gantry space is cm from the home corner; world space is Three.js metres with the sand at Y = 0.",
+  "gantry": { "travelXCm": 100, "travelYCm": 40, "maxSpeedCmS": 15, "accelCmS2": 30, "originOffsetCm": [50, 20] },
+  "camera": { "lensHeightM": 0.42, "hfovDeg": 75, "aspect": 1.3333333333333333, "captureWidthPx": 640, "captureHeightPx": 480 }
+}
