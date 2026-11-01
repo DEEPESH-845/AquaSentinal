@@ -17,7 +17,7 @@ Any unchecked item in "Blockers" means the live Meta demo cannot be claimed; use
 
 - [ ] `MODEL_API_KEY` exported in the shell that runs `npm run dev:all` (the backend reads the process environment only)
 - [ ] `npm run eval:meta` finished with `voice: LIVE_META`, `segmentation: LIVE_META` and a Spark parsing row
-- [ ] `docs/evidence/model-executions.json` contains `LIVE_META` rows for `transcription`, `mission_planning`, `frame_reasoning` and `segmentation`
+- [ ] `docs/evidence/model-executions.json` contains `LIVE_META` rows for `transcription`, `mission_planning` and `segmentation` (the evaluation uses fixed prompts, so `frame_reasoning` first appears in the judge demo log)
 - [ ] Scene 08 Judge preflight reads "live Meta verified"
 - [ ] Top bar AI chip reads META LIVE
 
