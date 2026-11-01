@@ -127,6 +127,15 @@ def test_duplicate_reuse_requires_same_inputs_and_a_successful_result(client):
     assert narrowed["duplicateOf"] is None, "different targets are a different question"
 
 
+def test_preflight_reports_missing_credentials_as_blockers(client):
+    pre = client.get("/api/system/preflight").json()
+    assert not pre["ready"] and not pre["liveMetaReady"]
+    assert {"credentials", "meta_live", "sam", "voice"} <= set(pre["blockers"])
+    detail = {c["id"]: c["detail"] for c in pre["checks"]}
+    assert detail["mode"].startswith("SIMULATED") and detail["camera"].startswith("SIMULATED")
+    assert client.get("/api/evidence/model-executions").json() == {"transport": "NONE", "counts": {}, "executions": []}
+
+
 def test_capture_validation_and_voice_offline(client):
     bad = client.post("/api/inspection/capture", data={"meta": json.dumps({"missionId": "x"})}, files={"frame": ("f.jpg", b"x", "image/jpeg")})
     assert bad.status_code == 422

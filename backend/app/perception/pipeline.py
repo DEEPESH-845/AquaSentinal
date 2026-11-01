@@ -187,7 +187,7 @@ class PerceptionPipeline:
             return FrameReasoning(provider="MUSE_SPARK", scene_summary="phrases cached from the first frame of this mission", phrases=st.phrases)
         try:
             self.queue.charge(meta.mission_id, "spark", self.settings.max_spark_calls_per_mission)
-            data, latency = await self.queue.run(meta.mission_id, f"spark:{meta.mission_id}", lambda: self.spark.analyze_frame(jpeg, targets))  # type: ignore[union-attr]
+            data, latency = await self.queue.run(meta.mission_id, f"spark:{meta.mission_id}", lambda: self.spark.analyze_frame(jpeg, targets, ref=f"mission:{meta.mission_id} seq={meta.seq}"))  # type: ignore[union-attr]
             phrases = [p for p in data.get("phrases", []) if isinstance(p, dict) and str(p.get("phrase", "")).strip()][:MAX_PHRASES]
             # A target the model did not mention still gets its fallback phrase, so a missed concept is still searched for.
             named = {p.get("target_class") for p in phrases}
@@ -210,7 +210,7 @@ class PerceptionPipeline:
             return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="SKIPPED_BUDGET", latency_ms=None, error=str(e), instances=[])
         key = f"sam:{hashlib.sha1(jpeg).hexdigest()}:{prompt}"
         try:
-            instances, latency = await self.queue.run(meta.mission_id, key, lambda: self.sam.segment(jpeg, prompt, w, h))  # type: ignore[union-attr]
+            instances, latency = await self.queue.run(meta.mission_id, key, lambda: self.sam.segment(jpeg, prompt, w, h, ref=f"capture:{capture_id}"))  # type: ignore[union-attr]
         except asyncio.CancelledError:
             raise
         except (MetaAPIError, asyncio.TimeoutError) as e:

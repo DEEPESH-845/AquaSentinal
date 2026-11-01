@@ -88,7 +88,7 @@ class Spark:
         self.client = client
         self.model = model
 
-    async def plan(self, instruction: str, registry: ToolRegistry, max_turns: int = 6) -> PlanningOutcome:
+    async def plan(self, instruction: str, registry: ToolRegistry, max_turns: int = 6, ref: str = "") -> PlanningOutcome:
         """Agent loop: the model may read state, then must call create_inspection_mission. Invalid calls go back to it as errors."""
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": PLANNER_SYSTEM},
@@ -97,7 +97,9 @@ class Spark:
         tools = registry.schemas("PLANNING")
         timeline: list[ToolCallRecord] = []
         for turn in range(1, max_turns + 1):
-            body, _ = await self.client.chat({"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"})
+            body, _ = await self.client.chat(
+                {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}, op="mission_planning", input_ref=f"{ref} turn={turn}".strip()
+            )
             choice = (body.get("choices") or [{}])[0]
             msg = choice.get("message") or {}
             calls = msg.get("tool_calls") or []
@@ -120,7 +122,7 @@ class Spark:
                 return PlanningOutcome(created=created, explanation=explanation or (msg.get("content") or ""), timeline=timeline, turns=turn)
         raise PlanningFailed(f"no valid mission after {max_turns} model turns", timeline)
 
-    async def analyze_frame(self, jpeg: bytes, targets: list[str]) -> tuple[dict[str, Any], float]:
+    async def analyze_frame(self, jpeg: bytes, targets: list[str], ref: str = "") -> tuple[dict[str, Any], float]:
         url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
         body, latency = await self.client.chat(
             {
@@ -136,11 +138,13 @@ class Spark:
                     },
                 ],
                 "response_format": {"type": "json_schema", "json_schema": {"name": "FrameObservations", "schema": FRAME_SCHEMA}},
-            }
+            },
+            op="frame_reasoning",
+            input_ref=ref,
         )
         return _json_content(body), latency
 
-    async def summarize(self, records: dict[str, Any]) -> tuple[dict[str, Any], float]:
+    async def summarize(self, records: dict[str, Any], ref: str = "") -> tuple[dict[str, Any], float]:
         t0 = time.perf_counter()
         body, _ = await self.client.chat(
             {
@@ -150,7 +154,9 @@ class Spark:
                     {"role": "user", "content": json.dumps(records, default=str)[:60000]},
                 ],
                 "response_format": {"type": "json_schema", "json_schema": {"name": "InspectionSummary", "schema": SUMMARY_SCHEMA}},
-            }
+            },
+            op="report_summary",
+            input_ref=ref,
         )
         return _json_content(body), (time.perf_counter() - t0) * 1000
 

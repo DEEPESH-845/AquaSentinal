@@ -41,13 +41,15 @@ class Voice:
         self.client = client
         self.model = model
 
-    async def transcribe(self, wav: bytes) -> tuple[dict, float]:
-        validate_wav(wav)
+    async def transcribe(self, wav: bytes, ref: str = "") -> tuple[dict, float]:
+        seconds = validate_wav(wav)
         request = {"model": self.model, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK", "keywords": KEYWORDS, "languageBias": ["English"]}
         body, latency = await self.client.multipart(
             "/asr/transcribe",
             self.model,
             {"request": (None, json.dumps(request), "application/json"), "audio": ("command.wav", wav, "audio/wav")},
+            op="transcription",
+            input_ref=f"{ref} wav={seconds:.1f}s".strip(),
         )
         self.client.usage.get(self.model).audio_ms += int(body.get("audioDurationMs") or 0)
         return body, latency

@@ -11,8 +11,10 @@ import json
 import logging
 import random
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -94,6 +96,23 @@ class UsageTracker:
         }
 
 
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds")
+
+
+# Response headers that may carry a provider trace id. Only the value is kept; no other header is recorded.
+TRACE_HEADERS = ("x-request-id", "x-fb-trace-id", "x-trace-id", "request-id")
+
+
+def _trace_id(resp: httpx.Response | None) -> str | None:
+    if resp is None:
+        return None
+    for h in TRACE_HEADERS:
+        if resp.headers.get(h):
+            return resp.headers[h][:128]
+    return None
+
+
 def _map_error(resp: httpx.Response) -> MetaAPIError:
     type_ = code = None
     message = f"HTTP {resp.status_code}"
@@ -123,6 +142,7 @@ class MetaClient:
         transport: httpx.AsyncBaseTransport | None = None,
         usage: UsageTracker | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        on_execution: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.__key = api_key
         self.base_url = base_url.rstrip("/")
@@ -130,6 +150,10 @@ class MetaClient:
         self.max_retries = max_retries
         self.usage = usage or UsageTracker()
         self._sleep = sleep
+        self._on_execution = on_execution
+        # Evidence classification is decided by construction, never by a flag a caller could forget:
+        # a test transport is MOCK_TRANSPORT, anything else is the network endpoint at base_url.
+        self.transport_kind = "MOCK_TRANSPORT" if isinstance(transport, httpx.MockTransport) else "META_API"
         self._http = httpx.AsyncClient(base_url=self.base_url, transport=transport, timeout=httpx.Timeout(timeout_s, connect=10.0))
 
     @property
@@ -145,11 +169,34 @@ class MetaClient:
     def _headers(self, accept: str = "application/json") -> dict[str, str]:
         return {"Authorization": f"Bearer {self.__key}", "Accept": accept}
 
-    async def _with_retries(self, model: str, call: Callable[[], Awaitable[httpx.Response]]) -> tuple[httpx.Response, float]:
+    def _emit(self, rec: dict[str, Any]) -> None:
+        """Finishes an execution record and hands it to the sink. A failing sink never fails the model call."""
+        rec["responseAt"] = _now_iso()
+        if rec["transport"] == "MOCK_TRANSPORT":
+            rec["classification"] = "MOCKED"
+        else:
+            rec["classification"] = "LIVE_META" if rec["success"] else "LIVE_META_FAILED"
+        if self._on_execution:
+            try:
+                self._on_execution(rec)
+            except Exception:  # noqa: BLE001
+                log.exception("could not record a model execution")
+
+    async def _with_retries(
+        self, model: str, call: Callable[[], Awaitable[httpx.Response]], op: str = "", input_ref: str = ""
+    ) -> tuple[httpx.Response, float, dict[str, Any]]:
+        """Returns the response, latency and an open execution record. On failure the record is emitted here;
+        on success the caller adds its output reference and emits it."""
         if not self.available:
             raise MetaUnavailable()
         usage = self.usage.get(model)
         attempt = 0
+        rec: dict[str, Any] = {
+            "id": f"exe_{uuid.uuid4().hex[:12]}", "model": model, "operation": op, "inputRef": input_ref, "requestAt": _now_iso(),
+            "transport": self.transport_kind, "endpoint": self.base_url, "attempts": 0, "success": False,
+            "status": None, "error": None, "traceId": None, "outputRef": None, "durationMs": None,
+        }
+        started = time.perf_counter()
         while True:
             t0 = time.perf_counter()
             try:
@@ -160,14 +207,19 @@ class MetaClient:
             else:
                 err = _map_error(resp) if resp.status_code >= 400 else None  # type: ignore[assignment]
             latency = (time.perf_counter() - t0) * 1000
+            rec["attempts"] = attempt + 1
+            rec["traceId"] = _trace_id(resp) or rec["traceId"]
             if err is None:
                 usage.requests += 1
                 usage.latency_ms_total += latency
-                return resp, latency  # type: ignore[return-value]
+                rec.update(success=True, status=resp.status_code, durationMs=round((time.perf_counter() - started) * 1000, 1))  # type: ignore[union-attr]
+                return resp, latency, rec  # type: ignore[return-value]
             if not err.retryable or attempt >= self.max_retries:
                 usage.requests += 1
                 usage.errors += 1
                 usage.last_error = f"{err.status} {err.code or err.type or ''}".strip()
+                rec.update(status=err.status, error=usage.last_error, durationMs=round((time.perf_counter() - started) * 1000, 1))
+                self._emit(rec)
                 log.warning("meta call failed", extra={"model": model, "status": err.status, "code": err.code, "attempts": attempt + 1})
                 raise err
             attempt += 1
@@ -182,20 +234,28 @@ class MetaClient:
             log.info("meta call retry", extra={"model": model, "status": err.status, "attempt": attempt, "delay_s": round(delay, 2)})
             await self._sleep(delay)
 
-    async def chat(self, payload: dict[str, Any], *, timeout_s: float | None = None) -> tuple[dict[str, Any], float]:
+    async def chat(self, payload: dict[str, Any], *, timeout_s: float | None = None, op: str = "chat", input_ref: str = "") -> tuple[dict[str, Any], float]:
         """POST /chat/completions. Returns the body and latency; token usage is recorded."""
         model = payload["model"]
-        resp, latency = await self._with_retries(
-            model, lambda: self._http.post("/chat/completions", json=payload, headers=self._headers(), timeout=timeout_s or self.timeout_s)
+        resp, latency, rec = await self._with_retries(
+            model, lambda: self._http.post("/chat/completions", json=payload, headers=self._headers(), timeout=timeout_s or self.timeout_s), op, input_ref
         )
         body = resp.json()
         u = body.get("usage") or {}
         usage = self.usage.get(model)
         usage.prompt_tokens += int(u.get("prompt_tokens") or 0)
         usage.completion_tokens += int(u.get("completion_tokens") or 0)
+        msg = ((body.get("choices") or [{}])[0].get("message") or {}) if isinstance(body, dict) else {}
+        calls = [str((c.get("function") or {}).get("name")) for c in msg.get("tool_calls") or []]
+        rec["outputRef"] = f"completion:{body.get('id') or '?'}" + (f" tool_calls={','.join(calls)}" if calls else "")
+        rec["traceId"] = rec["traceId"] or (str(body["id"])[:128] if body.get("id") else None)
+        rec["tokens"] = {"prompt": int(u.get("prompt_tokens") or 0), "completion": int(u.get("completion_tokens") or 0)}
+        self._emit(rec)
         return body, latency
 
-    async def responses_stream_text(self, payload: dict[str, Any], *, timeout_s: float | None = None) -> tuple[str, dict[str, Any], float]:
+    async def responses_stream_text(
+        self, payload: dict[str, Any], *, timeout_s: float | None = None, op: str = "responses", input_ref: str = ""
+    ) -> tuple[str, dict[str, Any], float]:
         """POST /responses with stream=true and accumulate the output_text lane. Returns (text, final response, latency)."""
         model = payload["model"]
 
@@ -208,7 +268,7 @@ class MetaClient:
                 await resp.aread()
             return resp
 
-        resp, head_ms = await self._with_retries(model, call)
+        resp, head_ms, rec = await self._with_retries(model, call, op, input_ref)
         t0 = time.perf_counter()
         text_parts: list[str] = []
         final: dict[str, Any] = {}
@@ -233,13 +293,30 @@ class MetaClient:
                     break
                 elif kind in ("response.failed", "error"):
                     err = event.get("error") or (event.get("response") or {}).get("error") or {}
+                    rec.update(success=False, status=502, error=f"stream {err.get('code') or err.get('type') or 'failed'}")
                     raise MetaAPIError(502, str(err.get("message") or "stream failed"), type_=err.get("type"), code=err.get("code"))
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            rec.update(success=False, status=504 if isinstance(e, httpx.TimeoutException) else 502, error=f"stream {type(e).__name__}")
+            raise MetaAPIError(rec["status"], f"{type(e).__name__} reading the Meta API stream", retryable=False) from e
         finally:
             await resp.aclose()
-        return "".join(text_parts), final, head_ms + (time.perf_counter() - t0) * 1000
+            total = head_ms + (time.perf_counter() - t0) * 1000
+            rec["durationMs"] = round(total, 1)
+            text = "".join(text_parts)
+            rec["outputRef"] = f"response:{final.get('id') or '?'} chars={len(text)}" + (" incomplete" if final.get("_incomplete") else "")
+            rec["traceId"] = rec["traceId"] or (str(final["id"])[:128] if final.get("id") else None)
+            self._emit(rec)
+        return text, final, total
 
-    async def multipart(self, path: str, model: str, files: dict[str, tuple[str | None, bytes | str, str]], *, timeout_s: float | None = None) -> tuple[dict[str, Any], float]:
-        resp, latency = await self._with_retries(
-            model, lambda: self._http.post(path, files=files, headers=self._headers(), timeout=timeout_s or self.timeout_s)
+    async def multipart(
+        self, path: str, model: str, files: dict[str, tuple[str | None, bytes | str, str]], *, timeout_s: float | None = None, op: str = "multipart", input_ref: str = ""
+    ) -> tuple[dict[str, Any], float]:
+        resp, latency, rec = await self._with_retries(
+            model, lambda: self._http.post(path, files=files, headers=self._headers(), timeout=timeout_s or self.timeout_s), op, input_ref
         )
-        return resp.json(), latency
+        body = resp.json()
+        sid = body.get("sessionId") if isinstance(body, dict) else None
+        rec["outputRef"] = f"session:{sid or '?'} chars={len(str(body.get('transcript', ''))) if isinstance(body, dict) else 0}"
+        rec["traceId"] = rec["traceId"] or (str(sid)[:128] if sid else None)
+        self._emit(rec)
+        return body, latency
