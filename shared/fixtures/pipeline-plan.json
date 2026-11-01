@@ -1,0 +1,16 @@
+{
+  "$comment": "Contract fixture: the plan backend/app/mission/compiler.py must produce for shared/fixtures/pipeline-spec.json. sim:check executes it on the twin; pytest checks the compiler against it.",
+  "missionId": "fixture-pipeline",
+  "waypoints": [
+    { "x": 10, "y": 20, "capture": true },
+    { "x": 26, "y": 20, "capture": true },
+    { "x": 42, "y": 20, "capture": true },
+    { "x": 58, "y": 20, "capture": true },
+    { "x": 74, "y": 20, "capture": true },
+    { "x": 90, "y": 20, "capture": true }
+  ],
+  "speedFraction": 0.65,
+  "targets": ["LOOSE_CABLE", "FOREIGN_OBJECT", "PIPE_JOINT"],
+  "policy": { "reduceSpeedOnDegradation": true, "stopOnUnsafeVisibility": true, "degradedVisibility": 0.75, "unsafeVisibility": 0.45, "reducedSpeedFraction": 0.35 },
+  "region": { "xMin": 10, "xMax": 90, "yMin": 8, "yMax": 32 }
+}

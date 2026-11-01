@@ -1,0 +1,14 @@
+{
+  "missionId": "fixture-pipeline",
+  "objective": "pipeline_inspection",
+  "targets": ["loose_cable", "foreign_object", "pipe_joint"],
+  "scanPattern": "left_to_right",
+  "region": { "xMin": 10, "xMax": 90, "yMin": 8, "yMax": 32 },
+  "laneSpacingCm": 24,
+  "captureSpacingCm": 16,
+  "speedFraction": 0.65,
+  "priority": "high",
+  "recordEvidence": true,
+  "visibilityPolicy": { "reduceSpeedOnDegradation": true, "stopOnUnsafeVisibility": true, "degradedVisibility": 0.75, "unsafeVisibility": 0.45, "reducedSpeedFraction": 0.35 },
+  "notes": "contract fixture"
+}
