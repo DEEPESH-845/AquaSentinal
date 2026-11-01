@@ -1,7 +1,7 @@
 /**
  * Typed client for the AquaSentinal backend. The browser never talks to Meta: every model call goes through these routes.
  */
-import type { CaptureResult, HistoryItem, InspectionReport, InterpretResponse, MissionRecord, SystemStatus, TranscriptResult } from "./types";
+import type { CaptureResult, ExecutionLog, HistoryItem, InspectionReport, InterpretResponse, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "./types";
 
 export const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -71,9 +71,12 @@ export const api = {
   capture: (form: FormData) => request<CaptureResult>("/api/inspection/capture", { method: "POST", body: form, timeoutMs: 120_000 }),
   report: (id: string) => request<InspectionReport>(`/api/inspection/${encodeURIComponent(id)}/report`),
   history: () => request<HistoryItem[]>("/api/inspection/history"),
-  transcribe: (wav: Blob) => {
+  preflight: () => request<Preflight>("/api/system/preflight", { timeoutMs: 4000 }),
+  executions: (limit = 50) => request<ExecutionLog>(`/api/evidence/model-executions?limit=${limit}`, { timeoutMs: 4000 }),
+  transcribe: (wav: Blob, inputSource: VoiceInputSource = "LIVE_MICROPHONE") => {
     const form = new FormData();
     form.append("audio", wav, "command.wav");
+    form.append("inputSource", inputSource);
     return request<TranscriptResult>("/api/voice/transcribe", { method: "POST", body: form, timeoutMs: 60_000 });
   },
   command: (type: "ESTOP" | "CLEAR_ESTOP" | "STOP") =>

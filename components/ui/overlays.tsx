@@ -8,6 +8,7 @@ import { DEMO_INSTRUCTION, DEMO_PHASES } from "@/lib/sim/demo";
 import { useSimStore } from "@/lib/sim/store";
 import type { MissionResult } from "@/lib/sim/types";
 import { useMissionStore } from "@/lib/store/mission";
+import { ExecTag } from "./intelligence";
 import { Btn, SourceTag, f1, pad2, pct, providerSource } from "./shared";
 
 function MissionMetrics({ r }: { r: MissionResult }) {
@@ -29,6 +30,40 @@ function MissionMetrics({ r }: { r: MissionResult }) {
           <div className={`value truncate text-[13px] leading-tight ${tone ?? "text-text"}`}>{v}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** The instruction as the backend received it: transcript with its audio source and model call, or the typed fallback. */
+function DemoCommand() {
+  const transcript = useMissionStore((s) => s.transcript);
+  const voice = useMissionStore((s) => s.voice);
+  const interpreting = useMissionStore((s) => s.interpreting);
+  const interpretError = useMissionStore((s) => s.interpretError);
+  const voiceLive = useMissionStore((s) => s.system?.providers.voice.status === "LIVE");
+  const exec = useMissionStore((s) => s.executionLog?.executions.find((e) => e.operation === "transcription")?.classification);
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="border-l-2 border-teal pl-2">
+        <p className="text-[12px] leading-snug text-text">&quot;{transcript?.transcript ?? DEMO_INSTRUCTION}&quot;</p>
+      </div>
+      <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
+        {transcript ? (
+          <>
+            <ExecTag c={transcript.source === "RECORDED_INPUT" ? "RECORDED_INPUT" : "LIVE_INPUT"} /> <ExecTag c={exec ?? "NOT_RUN"} /> Muse Voice Transcribe, {transcript.latencyMs} ms
+          </>
+        ) : voice.state === "TRANSCRIBING" ? (
+          "Transcribing the recorded instruction..."
+        ) : voice.state === "ERROR" ? (
+          <span className="text-amber">Voice Transcribe failed: {voice.error}. Using the typed instruction.</span>
+        ) : (
+          <>
+            <ExecTag c="NOT_RUN" /> {voiceLive ? "Typed instruction." : "Typed instruction: Voice Transcribe needs MODEL_API_KEY."}
+          </>
+        )}
+      </p>
+      {interpreting && <p className="text-[11px] text-muted">Planning...</p>}
+      {interpretError && <p className="text-[11px] text-amber">Planning failed: {interpretError}</p>}
     </div>
   );
 }
@@ -75,11 +110,7 @@ export function DemoCard() {
         <motion.div key={p.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18, ease: "easeOut" }}>
           <h2 className="font-sans text-lg leading-tight text-text">{p.title}</h2>
           <p className="mt-1 text-[12px] leading-snug text-muted">{p.caption}</p>
-          {p.id === "COMMAND" && (
-            <div className="mt-2 border-l-2 border-teal pl-2">
-              <p className="text-[12px] leading-snug text-text">&quot;{DEMO_INSTRUCTION}&quot;</p>
-            </div>
-          )}
+          {p.id === "COMMAND" && <DemoCommand />}
           {p.id === "PLAN" && (
             <p className="value mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
               {mission ? (
@@ -91,7 +122,9 @@ export function DemoCard() {
               )}
             </p>
           )}
-          {usedFixture && p.id !== "OVERVIEW" && p.id !== "COMMAND" && <p className="mt-1 text-[11px] text-amber">Backend unavailable: running the built-in contract fixture plan.</p>}
+          {usedFixture && p.id !== "INTRO" && p.id !== "COMMAND" && (
+            <p className="mt-1 text-[11px] text-amber">No backend plan arrived (planning failed or the backend is unreachable): the twin runs the built-in contract fixture plan, which no model produced.</p>
+          )}
           {isResult && result && (
             <div className="mt-3">
               <MissionMetrics r={result} />

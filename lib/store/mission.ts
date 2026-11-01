@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { ApiError, api, type TwinContext } from "@/lib/api/client";
-import type { CaptureResult, EventEnvelope, HistoryItem, InspectionReport, MissionRecord, SystemStatus } from "@/lib/api/types";
+import type { CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
 import { PushToTalk } from "@/lib/audio/wav";
 import { useSimStore } from "@/lib/sim/store";
 import type { CaptureRequest, MissionResult } from "@/lib/sim/types";
@@ -32,11 +32,20 @@ interface VoiceState {
   durationMs?: number;
 }
 
+/** The last Voice Transcribe result and where its audio came from, so the UI never shows a recorded file as a live voice. */
+export type TranscriptView = TranscriptResult & { source: VoiceInputSource };
+
+/** Prepared audio of the demo instruction (synthetic speech, macOS `say`). Always labelled RECORDED_INPUT. */
+export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
+
 interface MissionStore {
   backend: BackendState;
   system: SystemStatus | null;
   instruction: string;
   voice: VoiceState;
+  transcript: TranscriptView | null;
+  preflight: Preflight | null;
+  executionLog: ExecutionLog | null;
   interpreting: boolean;
   interpretError: string | null;
   /** the error came from Muse Spark, so the operator may choose the labelled offline parser */
@@ -56,6 +65,9 @@ interface MissionStore {
   setInstruction: (s: string) => void;
   startVoice: () => Promise<void>;
   stopVoice: () => Promise<void>;
+  /** Sends the prepared recording through Voice Transcribe. Returns the transcript, or null with voice.error set. */
+  transcribeRecorded: () => Promise<string | null>;
+  refreshEvidence: () => Promise<void>;
   interpret: (offline?: boolean) => Promise<MissionRecord | null>;
   discard: () => void;
   approve: () => Promise<boolean>;
@@ -97,6 +109,9 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   system: null,
   instruction: "",
   voice: { state: "IDLE" },
+  transcript: null,
+  preflight: null,
+  executionLog: null,
   interpreting: false,
   interpretError: null,
   canFallBack: false,
@@ -148,12 +163,32 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     set({ voice: { state: "TRANSCRIBING" } });
     try {
       const wav = await recorder.stop();
-      const r = await api.transcribe(wav);
-      set({ instruction: r.transcript, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
+      const r = await api.transcribe(wav, "LIVE_MICROPHONE");
+      set({ instruction: r.transcript, transcript: { ...r, source: "LIVE_MICROPHONE" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
     } catch (e) {
       recorder.cancel();
       set({ voice: { state: "ERROR", error: msg(e) } });
     }
+  },
+
+  transcribeRecorded: async () => {
+    set({ voice: { state: "TRANSCRIBING" } });
+    try {
+      const res = await fetch(RECORDED_INSTRUCTION_URL);
+      if (!res.ok) throw new Error(`recorded instruction missing (HTTP ${res.status})`);
+      const r = await api.transcribe(await res.blob(), "RECORDED_INPUT");
+      set({ instruction: r.transcript, transcript: { ...r, source: "RECORDED_INPUT" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
+      void get().refreshEvidence();
+      return r.transcript;
+    } catch (e) {
+      set({ voice: { state: "ERROR", error: msg(e) } });
+      return null;
+    }
+  },
+
+  refreshEvidence: async () => {
+    const [preflight, executionLog] = await Promise.all([api.preflight().catch(() => null), api.executions().catch(() => null)]);
+    set({ preflight, executionLog });
   },
 
   interpret: async (offline = false) => {
@@ -166,6 +201,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     try {
       const r = await api.interpret(text, twinContext(), offline);
       set({ mission: r.mission, interpreting: false });
+      void get().refreshEvidence();
       return r.mission;
     } catch (e) {
       const live = get().system?.providers.spark.status === "LIVE";

@@ -2,7 +2,7 @@ import { expect, test } from "./lab";
 
 /** One composition snapshot per scene, in the lab's default state. 3D is software-rendered, so the tolerance is loose. */
 test.describe("visual", () => {
-  for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) {
     test(`scene ${n}`, async ({ lab, page }) => {
       // earlier specs leave missions in the backend; the report scene's history list must not depend on them
       await page.route("**/api/inspection/history", (route) => route.fulfill({ json: [], headers: { "access-control-allow-origin": "*" } }));

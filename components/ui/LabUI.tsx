@@ -9,6 +9,7 @@ import { useSimStore, type SceneId } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
 import { BackendBridge } from "./bridge";
 import { CameraFeed } from "./CameraFeed";
+import { IntelligenceCard, OriginTag } from "./intelligence";
 import { MissionCard } from "./mission";
 import { DemoCard, VisionMoment } from "./overlays";
 import { PerceptionCard } from "./perception";
@@ -25,6 +26,7 @@ const SCENES: { id: SceneId; name: string }[] = [
   { id: 5, name: "Mission" },
   { id: 6, name: "Environment" },
   { id: 7, name: "Report" },
+  { id: 8, name: "Intelligence" },
 ];
 
 const CARDS: Record<SceneId, () => React.JSX.Element> = {
@@ -35,10 +37,11 @@ const CARDS: Record<SceneId, () => React.JSX.Element> = {
   5: MissionCard,
   6: EnvironmentCard,
   7: ReportCard,
+  8: IntelligenceCard,
 };
 
 /** Scenes whose card carries more than a paragraph get a wider card. */
-const WIDE: Partial<Record<SceneId, boolean>> = { 3: true, 5: true, 7: true };
+const WIDE: Partial<Record<SceneId, boolean>> = { 3: true, 5: true, 7: true, 8: true };
 
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 
@@ -68,9 +71,9 @@ export function LabUI() {
       const s = useSimStore.getState();
       if (s.demo.active || s.showVision) return;
       const cur = s.scene;
-      if (e.key === "ArrowDown" || e.key === "ArrowRight") s.setScene(Math.min(7, cur + 1) as SceneId);
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") s.setScene(Math.min(8, cur + 1) as SceneId);
       else if (e.key === "ArrowUp" || e.key === "ArrowLeft") s.setScene(Math.max(1, cur - 1) as SceneId);
-      else if (e.key >= "1" && e.key <= "7") s.setScene(Number(e.key) as SceneId);
+      else if (e.key >= "1" && e.key <= "8") s.setScene(Number(e.key) as SceneId);
       else return;
       e.preventDefault();
     };
@@ -140,7 +143,16 @@ export function LabUI() {
               exit={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              {demoActive ? <DemoCard /> : <Card />}
+              {demoActive ? (
+                <DemoCard />
+              ) : (
+                <>
+                  <div className="float-right ml-3">
+                    <OriginTag scene={scene} />
+                  </div>
+                  <Card />
+                </>
+              )}
             </motion.div>
           </AnimatePresence>
         </div>

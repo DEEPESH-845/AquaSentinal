@@ -162,6 +162,51 @@ export interface TranscriptResult {
   latencyMs: number;
 }
 
+/** Where the audio came from. RECORDED_INPUT is a prepared file, never presented as a live microphone. */
+export type VoiceInputSource = "LIVE_MICROPHONE" | "RECORDED_INPUT";
+
+/**
+ * One Meta model request from the backend's execution log. LIVE_META means a successful request to the Meta API endpoint;
+ * MOCKED means a test transport answered. Records hold references only, never content or keys.
+ */
+export interface ModelExecution {
+  id: string;
+  model: string;
+  operation: string;
+  inputRef: string;
+  outputRef: string | null;
+  requestAt: string;
+  responseAt: string;
+  durationMs: number | null;
+  attempts: number;
+  success: boolean;
+  status: number | null;
+  error: string | null;
+  traceId: string | null;
+  transport: "META_API" | "MOCK_TRANSPORT";
+  classification: "LIVE_META" | "LIVE_META_FAILED" | "MOCKED";
+}
+
+export interface ExecutionLog {
+  transport: "META_API" | "MOCK_TRANSPORT" | "NONE";
+  counts: Partial<Record<ModelExecution["classification"], number>>;
+  executions: ModelExecution[];
+}
+
+export interface PreflightCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface Preflight {
+  ready: boolean;
+  liveMetaReady: boolean;
+  blockers: string[];
+  checks: PreflightCheck[];
+}
+
 export interface ReportAsset {
   assetId: string;
   label: string;

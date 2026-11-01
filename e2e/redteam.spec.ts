@@ -191,7 +191,7 @@ test.describe("red team", () => {
     await lab.button(/run demo/i).click();
     await lab.waitFor((s) => s.demo.active && s.demo.t > 0.5);
     await lab.button(/replay/i).click();
-    await lab.waitFor((s) => s.demo.active && s.demo.phase === 0 && s.demo.t < 0.5 && s.scene === 1);
+    await lab.waitFor((s) => s.demo.active && s.demo.phase === 0 && s.demo.t < 0.5 && s.scene === 8);
     await lab.button(/exit demo/i).click();
     await lab.button(/^reset lab$/i).click();
     expect(await lab.state((s) => [s.mode, s.demo.active, s.preset, s.result])).toEqual(["IDLE", false, null, null]);

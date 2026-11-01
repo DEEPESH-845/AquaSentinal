@@ -11,13 +11,19 @@ import { useMissionStore } from "@/lib/store/mission";
  * Headless glue between the twin and the backend:
  * - system status every 5 s and the /ws/events socket (backend chip, report.ready),
  * - posts the twin's MissionResult to the backend when the mission the backend planned ends (or aborts the record if the twin was reset),
- * - during the demo, asks the backend to plan DEMO_INSTRUCTION and hands the plan to the director.
+ * - during the demo, sends the recorded instruction through Voice Transcribe when the key is set (the typed instruction otherwise,
+ *   labelled as such), asks the backend to plan it and hands the plan to the director.
  */
 export function BackendBridge() {
   useEffect(() => {
     const ms = useMissionStore.getState();
     void ms.refreshStatus();
-    const timer = setInterval(() => void useMissionStore.getState().refreshStatus(), 5000);
+    void ms.refreshEvidence();
+    const timer = setInterval(() => {
+      const s = useMissionStore.getState();
+      void s.refreshStatus();
+      void s.refreshEvidence(); // the execution log and preflight back every execution label in the UI
+    }, 5000);
     const dispose = connectEvents(
       (e) => useMissionStore.getState().onEvent(e),
       (state) => state === "OPEN" && void useMissionStore.getState().refreshStatus(),
@@ -52,7 +58,10 @@ export function BackendBridge() {
         requested.current = d.run;
         const ms = useMissionStore.getState();
         ms.setInstruction(DEMO_INSTRUCTION);
-        void ms.interpret().then(async (mission) => {
+        useMissionStore.setState({ transcript: null, interpretError: null });
+        const voiceLive = ms.system?.providers.voice.status === "LIVE";
+        // A failed transcription is shown in the demo card and the typed instruction is used; nothing is substituted silently.
+        void (voiceLive ? ms.transcribeRecorded() : Promise.resolve(null)).then(() => useMissionStore.getState().interpret()).then(async (mission) => {
           const now = useSimStore.getState();
           if (!mission || !now.demo.active || now.demo.run !== d.run) return;
           await api.start(mission.id).then((m) => useMissionStore.setState({ mission: m }), () => undefined);

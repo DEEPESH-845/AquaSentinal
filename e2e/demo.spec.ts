@@ -8,7 +8,7 @@ const frames = (page: Page, n = 2) =>
   }, n);
 
 test.describe("demo", () => {
-  test("OVERVIEW to REPORT with the backend's plan, one pause, a completed mission and its metrics", async ({ lab, page }) => {
+  test("INTRO to REPORT with the backend's plan, one pause, a completed mission and its metrics", async ({ lab, page }) => {
     // The demo clock only advances with rendered frames (software GL: a few per second), so phases take wall time.
     // The engine is fast-forwarded in slices while the mission runs; the phase minimums still have to elapse.
     test.setTimeout(600_000);
@@ -22,11 +22,17 @@ test.describe("demo", () => {
       });
     });
     await lab.button(/run demo/i).click();
-    await lab.waitFor((s) => s.demo.active && s.scene === 1);
+    // the judge demo opens on the new-intelligence view, not the inherited tank overview
+    await lab.waitFor((s) => s.demo.active && s.scene === 8);
+    await expect(page.getByTestId("intelligence-card")).toHaveCount(0); // the demo card replaces the scene card
     await expect(lab.rail(/^02/)).toBeDisabled();
     await expect(lab.button(/^reset lab$/i)).toBeDisabled();
 
-    // OVERVIEW, COMMAND and PLAN run on their own; the plan must come from the backend, not the built-in fixture
+    // offline the instruction is typed, and the COMMAND card says so instead of showing a transcript
+    await lab.waitFor((s) => s.demo.phase === 1, undefined, 120_000);
+    await expect(lab.card().getByText(/Typed instruction: Voice Transcribe needs MODEL_API_KEY/)).toBeVisible();
+
+    // INTRO, COMMAND and PLAN run on their own; the plan must come from the backend, not the built-in fixture
     await lab.waitFor((s) => s.demo.phase >= 3, undefined, 300_000);
     expect(await lab.state((s) => s.demo.usedFixture)).toBe(false);
     const planId = await lab.state((s) => s.demo.plan?.missionId);
