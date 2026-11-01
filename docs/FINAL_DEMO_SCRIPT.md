@@ -1,41 +1,100 @@
-# Demo script
+# Final demo script
 
-About two minutes in simulation; works without Meta credentials, and every offline output is labelled.
+One scenario: a submerged pipeline inspection with a loose cable, foreign objects and a controlled rise in turbidity (preset E).
+Every segment shows a hackathon-built capability; the inherited tank and gantry appear only as the place where it happens.
+Target length two minutes; adapt to the official video limit if it differs.
 
-## Setup
+## Before you start
 
-1. `npm run dev:all` (frontend on :3000, backend on :8000).
-2. Open http://localhost:3000 and check the top bar: MODE SIMULATION, BACKEND ONLINE, AI META LIVE or OFFLINE.
+1. Run the preflight in docs/DEMO_VALIDATION_CHECKLIST.md.
+2. Start the stack with the key exported in the same shell:
 
-## Automated run
+   ```bash
+   export MODEL_API_KEY=...
+   npm run dev:all
+   ```
 
-Press Run demo.
-The director loads scenario E (turbidity increase) and walks through seven phases:
+3. Open http://localhost:3000, press `8` (Intelligence), and confirm the Judge preflight panel.
+   "live Meta verified" appears only after one successful live call; run `npm run eval:meta` once beforehand, or plan one mission by hand, so it is green before recording.
+4. If the preflight shows "live Meta not verified", the Meta parts of this script cannot be claimed. Use the technical backup at the end.
 
-1. Overview: the tank, the pipeline, the gantry.
-2. Command: the instruction appears and the backend plans it (Muse Spark when live, the offline parser otherwise, labelled on the plan).
-3. Plan: waypoint count, captures and estimated time; the mission starts on the twin.
-4. Scan: the carriage homes, then follows the plan, capturing at each waypoint.
-5. Perceive: frames go through quality, reasoning, segmentation and tracking.
-6. Adapt: silt rises; the scan slows, then pauses until visibility recovers.
-7. Report: outcome, targets, false positives, unreliable frames, pauses, coverage; then the closing moment.
+## Execution labels the audience will see
 
-If the backend never answers, the demo runs the contract fixture plan and says so.
+| Tag | Meaning |
+|---|---|
+| LIVE META | The backend logged a successful request to the Meta API for this step |
+| LIVE CALL FAILED | The request was made and failed; the error is shown |
+| RECORDED INPUT | The audio is a prepared file (synthetic speech of the instruction), not a live microphone |
+| LIVE MICROPHONE | The audio was recorded with push-to-talk just now |
+| SIMULATED | Digital twin: gantry motion, water, camera frames |
+| DETERMINISTIC | Ordinary code: compiler, tracker, controller |
+| OFFLINE FALLBACK | No key or the model failed; a labelled rule-based or geometric substitute was used |
+| NOT RUN | The step has not happened yet |
 
-## Manual run (what to say and show)
+Gantry motion is always SIMULATED in this build. Never call it hardware.
 
-1. Mission (05): hold Hold to talk and say the instruction, or press Use the example instruction.
-   - "Inspect the submerged pipeline from left to right. Identify loose cables and foreign objects. Track any relevant objects and record their coordinates. Reduce scanning speed when visibility deteriorates and stop if visibility becomes unreliable."
-2. Press Plan mission; show the provider tag, explanation, spec, plan and the tool-call timeline.
-3. Press Approve and run; the view moves to Navigation (04) with the planned path on the sand and the pad.
-4. Environment (06): choose preset E before approving to show the pause, or C for the false positive that re-observation corrects.
-5. Perception (03): show a capture with masks (SAM when live, dashed twin-geometry outlines offline), toggle Sim detector boxes, read the image quality and observations.
-6. Press E-stop mid-scan: motion stops at once and every command is refused until Clear e-stop.
-7. Report (07): summary with its source, unverified anomaly candidates, map with uninspected strips, JSON and Markdown export, history, Replay on twin.
-8. Environment (06): Compare strategies shows measured adaptive and fixed numbers for the current scenario.
+## Script (automated judge demo, about 2 minutes)
+
+Press **Start judge demo** on scene 08. The director loads preset E and runs the same services as manual operation.
+
+### 0:00 to 0:15, the problem and the claim
+
+Screen: scene 08, "New inspection intelligence", with the eight-step pipeline.
+
+Say: "Underwater inspection fails quietly: visibility changes mid-scan, and you only find out afterwards that half the footage is useless. AquaSentinal is an inspection agent built this week on Meta's models. Everything on this panel is new; the tank and gantry are the testbed we already had."
+
+### 0:15 to 0:35, Act 1 and Act 2: instruction and mission
+
+Screen: COMMAND card. The recorded instruction goes through Voice Transcribe; the transcript appears with RECORDED INPUT and LIVE META tags and its latency. Muse Spark plans it.
+
+Instruction: "Inspect the pipeline from left to right. Identify the loose cable and foreign objects. Track them, record their coordinates and adapt the inspection speed when visibility deteriorates."
+
+Say: "That is the only input. Muse Spark reads the environment through tools and calls create_inspection_mission. It cannot move anything: motion tools are not even offered. The backend validates the spec and compiles bounded waypoints."
+
+Screen: PLAN card with mission id, captures and time, provider tag MUSE SPARK. Optional cut to Mission (05) for the tool-call timeline and spec.
+
+Do not show or describe hidden model reasoning; show the tool calls, the spec and the one-line explanation only.
+
+### 0:35 to 1:05, Act 3: perception
+
+Screen: SCAN, then PERCEIVE on Perception (03). Captures arrive; SAM 3.1 masks are drawn on the frame with prompts, confidence and asset ids; the loose cable and crate are amber.
+
+Say: "Each frame goes to Muse Spark once to choose what to look for, then to SAM 3.1, one concept per request. Masks become positioned observations, associated to persistent assets, so the cable seen in three frames is one cable with one coordinate."
+
+### 1:05 to 1:30, Act 4: adaptation
+
+Screen: ADAPT on Environment (06). Turbidity rises; perception state goes NORMAL to REDUCED VISIBILITY, speed drops, then PAUSED when visibility crosses the unsafe line; the scan resumes and re-observes when the water clears.
+
+Say: "This is a deterministic controller, not the language model. It slows down, then refuses to record frames it cannot trust. In the same scenario a fixed-speed scan records three unreliable frames and confirms one target; this one records none and confirms four. Those are simulation numbers, and they are in the repo."
+
+### 1:30 to 1:50, Act 5: the record
+
+Screen: REPORT. Outcome, captures, pauses, targets; then Report (07) with assets, coordinates, unverified anomaly candidates, uninspected strips and the summary with its source.
+
+Say: "Every finding keeps its frame, its model, its confidence and its coordinates. Nothing is called a defect until a person verifies it, and the report says which strips could not be inspected."
+
+### 1:50 to 2:00, impact
+
+Screen: scene 08 execution log with LIVE META rows.
+
+Say: "Target: fixed tanks and basins in aquaculture and water treatment, where a rail camera is realistic. Next: a physical tank run and operator trials."
+
+## Optional live voice moment (adds 15 seconds)
+
+Before pressing Start judge demo, go to Mission (05), hold **Hold to talk**, speak the instruction, release.
+The transcript appears tagged LIVE MICROPHONE.
+Plan it, show the tool timeline, then discard and start the judge demo.
+
+## Technical backup (network or key failure)
+
+1. If Voice Transcribe fails, the COMMAND card says so and the typed instruction is used. Say so out loud.
+2. If Muse Spark fails, the card shows the error. Press Exit demo, go to Mission (05), and press "Use the offline parser instead" only if you say "this is the rule-based fallback, not Muse Spark". The plan is tagged OFFLINE FALLBACK.
+3. If there is no key at all, run the demo anyway as a demonstration of the deterministic layers (validation, adaptive control, evidence) and say clearly that no Meta model ran. Every model step will read OFFLINE FALLBACK or NOT RUN.
+4. Never replace a live call with a recording of a previous run without saying it is a recording.
 
 ## What not to claim
 
 - No hardware was moved; the serial driver is unverified.
-- Without a key, nothing shown came from a Meta model.
+- Without LIVE META tags on screen, nothing shown came from a Meta model.
 - Segmentation is not a structural diagnosis.
+- No measured improvement over current practice; the comparison numbers are from the simulation.

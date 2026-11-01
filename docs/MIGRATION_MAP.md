@@ -16,7 +16,7 @@ Status meanings: copied (unchanged apart from imports), adapted (same module, ex
 | `lib/sim/detection.ts` | same | copied | Detection model unchanged | `sim:check` golden numbers |
 | `lib/sim/policy.ts` | same | copied | Controller unchanged, still used by the baseline test runner and object centring | `sim:check` controller section |
 | `lib/sim/engine.ts` | same | adapted | Scenario factory constructor, MISSION mode, latching emergency stop, capture queue, disturbances, mission result, environment telemetry; existing modes untouched | `sim:check` all sections |
-| `lib/sim/demo.ts` | same | refactored | Seven mission phases (OVERVIEW to REPORT) gated on engine and plan state, fixture plan fallback | `sim:check` demo section |
+| `lib/sim/demo.ts` | same | refactored | Seven mission phases (INTRO on scene 08 to REPORT) gated on engine and plan state, recorded instruction through Voice Transcribe when live, labelled fixture plan fallback | `sim:check` demo section |
 | `lib/sim/store.ts` | same | adapted | Mission, preset and e-stop actions; demo plan; mission snapshot fields | `sim:check` store section |
 | `lib/sim/selfcheck.ts` | same | adapted | HydraLoom assertions run on `referenceScenario`; new missions, perception and fixture sections | `npm run sim:check` |
 | (none) | `lib/sim/perception.ts`, `compare.ts`, `fixtures.ts` | new | Visibility estimate and disturbance schedule; headless strategy comparison; cross-language fixtures | `sim:check` |
@@ -43,7 +43,7 @@ Status meanings: copied (unchanged apart from imports), adapted (same module, ex
 | `shared.tsx` | same | adapted | Provenance `SourceTag`, danger button, class helpers | typecheck |
 | `scenes.tsx` | same | refactored | Overview, system architecture, navigation, environment cards; RL control and result cards removed | e2e |
 | `overlays.tsx` | same | adapted | Demo card for mission phases; closing moment rewritten | e2e demo |
-| (none) | `mission.tsx`, `perception.tsx`, `report.tsx`, `bridge.tsx` | new | AI mission control, perception viewer, report, backend glue | e2e |
+| (none) | `mission.tsx`, `perception.tsx`, `report.tsx`, `bridge.tsx`, `intelligence.tsx` | new | AI mission control, perception viewer, report, backend glue, scene 08 pipeline view with execution tags and judge preflight | e2e |
 | `app/layout.tsx`, `page.tsx`, `globals.css`, `favicon.ico` | same | adapted | Metadata; design tokens kept; danger button style | build |
 
 ## Configuration and tests
@@ -53,7 +53,7 @@ Status meanings: copied (unchanged apart from imports), adapted (same module, ex
 | `package.json`, `package-lock.json`, `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `eslint.config.mjs`, `playwright.config.ts`, `.gitignore`, `AGENTS.md` | same | adapted | Package renamed, scripts added, `reference/` ignored by lint |
 | `e2e/*.ts` | `e2e/` | adapted | Fixture and specs kept and updated for the new scenes |
 | `e2e/__screenshots__/*` | (none) | excluded | Baselines regenerated for the new interface |
-| `vercel.json` | (none) | excluded | Frontend-only deploy cannot run the backend; its Permissions-Policy blocked the microphone |
+| `vercel.json` | same | adapted | Permissions-Policy now allows `microphone=(self)` for push-to-talk; build runs typecheck and lint; the frontend-only deploy still cannot run the backend |
 | `docs/HANDOFF.md`, `docs/BLUEPRINT.md`, `README.md`, `CLAUDE.md` | (none) | excluded | Superseded by the documents in this folder |
 | `public/*.svg` | (none) | excluded | Next.js starter assets, unused |
 

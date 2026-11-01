@@ -61,6 +61,13 @@ No live Meta request has been made, so behaviour against the real service (laten
 - A failed or budget-skipped segmentation is always retried, never reused.
 - `UsageTracker` records requests, errors, retries, tokens, images, audio milliseconds, mean latency and an estimated cost using the published Standard-mode prices: Spark $1.25 and $4.25 per million input and output tokens, SAM $2.50 per 1,000 images, Voice $0.18 per audio hour.
 
+## Execution log
+
+Every request leaving `MetaClient` is recorded in the `model_executions` table with model, operation, input and output references, timestamps, duration, attempts, outcome and trace id, and served at `GET /api/evidence/model-executions`.
+The classification is `LIVE_META` for a successful request to the network endpoint, `LIVE_META_FAILED` for a failed one, and `MOCKED` whenever the client was built with `httpx.MockTransport`.
+Records hold references, never keys, audio, images or instruction text.
+docs/META_USAGE_EVIDENCE.md explains how to produce and read live evidence.
+
 ## Offline behaviour
 
 | Capability | Without a key |
