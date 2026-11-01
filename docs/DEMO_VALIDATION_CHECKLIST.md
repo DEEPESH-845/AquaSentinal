@@ -9,7 +9,7 @@ Any unchecked item in "Blockers" means the live Meta demo cannot be claimed; use
 - [ ] `npm run lint` clean
 - [ ] `npm run sim:check` prints `sim:check OK`
 - [ ] `npm run backend:test` all pass
-- [ ] `npm run e2e` all pass (about 15 minutes under software GL)
+- [ ] `npm run e2e` all pass (52 tests, about 10 minutes under software GL)
 - [ ] `npm run build` succeeds
 - [ ] `npm run eval:adaptive` reports all ten presets replayed identically
 

@@ -16,13 +16,13 @@ The per-file comparison against HydraLoom is `docs/evidence/provenance.tsv`, reg
 
 ## Per-file summary
 
-From `docs/evidence/provenance.tsv` (138 tracked files at the time of writing):
+From `docs/evidence/provenance.tsv` (164 tracked files on 2026-11-02, after the hackathon-directive commits):
 
 | Origin against HydraLoom | Files | Meaning |
 |---|---:|---|
-| IDENTICAL | 14 | Byte-identical copies, for example `Aquarium.tsx`, `Gantry.tsx`, `Electronics.tsx`, `CameraRig.tsx`, `gantry.ts`, `detection.ts`, `policy.ts`, `rng.ts` |
-| MODIFIED | 46 | Same path exists in HydraLoom; content changed. The size of the change is in the TSV; what it adds is below |
-| NEW | 78 | Path does not exist in HydraLoom: the whole backend, perception, mission, Meta clients, evidence, UI panels, tests, docs |
+| IDENTICAL | 13 | Byte-identical copies, for example `Aquarium.tsx`, `Gantry.tsx`, `Electronics.tsx`, `CameraRig.tsx`, `gantry.ts`, `detection.ts`, `policy.ts`, `rng.ts` |
+| MODIFIED | 47 | Same path exists in HydraLoom; content changed. The size of the change is in the TSV; what it adds is below |
+| NEW | 104 | Path does not exist in HydraLoom: the whole backend, perception, mission, Meta clients, evidence, UI panels, tests, docs |
 
 A file at the same path is not automatically inherited work: `lib/sim/engine.ts` keeps HydraLoom's 490 lines and adds 515.
 A file at a new path is not automatically original work: `backend/requirements.txt` and `backend/Dockerfile` replace HydraLoom files of the same name.

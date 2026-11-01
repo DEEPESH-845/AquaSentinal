@@ -58,7 +58,12 @@ The full list is the NEW rows of `docs/evidence/provenance.tsv`.
 | Commit | Change |
 |---|---|
 | `0590788` | fix(perception): reuse a near-duplicate segmentation only for identical inputs and a successful result |
-| see `git log 0590788..` | Model execution log, preflight, evaluation harness, contribution registry, intelligence view and judge demo, compliance documents |
+| `e353590` | feat(hackathon): log every Meta model execution and add a judge preflight (also carries the `DEMO_SCRIPT.md` to `FINAL_DEMO_SCRIPT.md` rename, staged early by mistake) |
+| `10deb72` | feat(hackathon): add contribution registry and per-file provenance against HydraLoom |
+| `4c452e0` | feat(demo): add the new inspection intelligence view and judge demo mode |
+| `474af28` | test(hackathon): add reproducible evaluation of parsing, segmentation and adaptive control |
+| `a9d8fcc` | docs(hackathon): add contribution, evidence, evaluation, impact, judging and demo documents |
+| later | see `git log --oneline a9d8fcc..` |
 
 The table is completed by `git log --oneline 0590788^..HEAD`; this file is not regenerated automatically.
 
