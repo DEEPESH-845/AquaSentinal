@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+@theme {
+  /* AquaSentinal design tokens, inherited from HydraLoom. Marine lab, not startup. */
+  --color-ground: #0b1219;
+  --color-panel: #101922;
+  --color-panel-2: #16212c;
+  --color-line: #243240;
+  --color-line-strong: #34465a;
+  --color-text: #e6edf3;
+  --color-muted: #8b98a5;
+  --color-dim: #738496; /* 4.6:1 on panel, the floor for 9 to 10 px labels */
+  --color-amber: #f2a93b;
+  --color-teal: #3db9b0;
+  --color-danger: #e5484d;
+  --color-ok: #5fbf7a;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    background-color: var(--color-ground);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    overflow: hidden;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-teal) 40%, transparent);
+  }
+  /* Keyboard focus ring in the machine colour. Mouse clicks do not show it. */
+  :focus-visible {
+    outline: 2px solid var(--color-teal);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Engineering panel: flat, 1px line, no blur stack. */
+  .panel {
+    background-color: color-mix(in oklab, var(--color-panel) 92%, transparent);
+    border: 1px solid var(--color-line);
+  }
+  .label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-text);
+    background: var(--color-panel-2);
+    transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+  }
+  .btn:hover {
+    border-color: var(--color-teal);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--color-amber);
+    border-color: var(--color-amber);
+    color: #1a1206;
+    font-weight: 600;
+  }
+  .btn-primary:hover {
+    background: #f7b95a;
+    border-color: #f7b95a;
+  }
+  .btn-danger {
+    background: color-mix(in oklab, var(--color-danger) 18%, var(--color-panel-2));
+    border-color: var(--color-danger);
+    color: #ffd9da;
+    font-weight: 600;
+  }
+  .btn-danger:hover {
+    background: var(--color-danger);
+    border-color: var(--color-danger);
+    color: #fff;
+  }
+  .btn-active {
+    border-color: var(--color-teal);
+    color: var(--color-teal);
+  }
+  .sim-tag {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    padding: 1px 5px;
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-muted);
+  }
+  textarea {
+    resize: none;
+  }
+  input[type="range"] {
+    accent-color: var(--color-teal);
+    width: 100%;
+  }
+}
