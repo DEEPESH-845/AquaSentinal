@@ -110,6 +110,23 @@ def test_offline_mission_lifecycle_capture_and_report(client):
     assert hist[0]["id"] == mid and hist[0]["captures"] == 4
 
 
+def test_duplicate_reuse_requires_same_inputs_and_a_successful_result(client):
+    """Regression: a scenario G capture at the same pose as an earlier good capture reused its OK segmentation, masking the fault."""
+    frame = lambda: {"frame": ("f.jpg", synthetic_frame(seed=0), "image/jpeg"), "idmask": ("i.png", id_mask_png({1: (100, 200, 260, 260)}), "image/png")}
+    send = lambda seq, **kw: client.post("/api/inspection/capture", data={"meta": capture_meta("manual", seq, **kw)}, files=frame()).json()
+    first = send(0)
+    assert first["segmentations"][0]["status"] == "OK"
+    faulted = send(1, perceptionFault="SEGMENTATION_FAILURE")
+    assert faulted["duplicateOf"] is None and faulted["segmentations"][0]["status"] == "FAILED"
+    retried = send(2, perceptionFault="SEGMENTATION_FAILURE")
+    assert retried["duplicateOf"] is None, "a failed result is retried, never reused"
+    send(3)
+    reused = send(4)
+    assert reused["duplicateOf"] is not None and reused["segmentations"][0]["status"] == "REUSED"
+    narrowed = send(5, targets=["valve"])
+    assert narrowed["duplicateOf"] is None, "different targets are a different question"
+
+
 def test_capture_validation_and_voice_offline(client):
     bad = client.post("/api/inspection/capture", data={"meta": json.dumps({"missionId": "x"})}, files={"frame": ("f.jpg", b"x", "image/jpeg")})
     assert bad.status_code == 422

@@ -94,7 +94,8 @@ class PerceptionPipeline:
         self.tracker = Tracker(repo)
         self.queue = InferenceQueue(settings.sam_concurrency, settings.request_timeout_s + 5)
         self._missions: dict[str, MissionPerceptionState] = {}
-        self._prints: dict[str, tuple[str, np.ndarray, tuple[float, float]]] = {}
+        # per mission: last capture id, fingerprint, position and perception inputs (targets, prompts, fault fixture)
+        self._prints: dict[str, tuple[str, np.ndarray, tuple[float, float], tuple]] = {}
 
     @property
     def live(self) -> bool:
@@ -124,12 +125,18 @@ class PerceptionPipeline:
                 notes.append("ID mask ignored: size mismatch or undecodable")
 
         fp = fingerprint(img)
+        # Reuse is only safe for the same view asked the same question, and only of a finished, successful result:
+        # different targets, prompts or fault fixture change the answer, and a failure or budget skip deserves a retry.
+        inputs = (tuple(sorted(meta.targets)), tuple(meta.prompts), meta.perception_fault)
         duplicate_of = None
+        reusable: list[Segmentation] = []
         prev = self._prints.get(meta.mission_id)
-        if prev and is_duplicate(prev[1], fp) and abs(prev[2][0] - meta.gantry_x) < 0.5 and abs(prev[2][1] - meta.gantry_y) < 0.5:
-            duplicate_of = prev[0]
-            notes.append(f"near-duplicate of {prev[0]}: segmentation reused, no new model request")
-        self._prints[meta.mission_id] = (capture_id, fp, (meta.gantry_x, meta.gantry_y))
+        if prev and prev[3] == inputs and is_duplicate(prev[1], fp) and abs(prev[2][0] - meta.gantry_x) < 0.5 and abs(prev[2][1] - meta.gantry_y) < 0.5:
+            reusable = self.repo.segmentations_for(prev[0])
+            if reusable and all(s.status in ("OK", "EMPTY", "REUSED") for s in reusable):
+                duplicate_of = prev[0]
+                notes.append(f"near-duplicate of {prev[0]}: segmentation reused, no new model request")
+        self._prints[meta.mission_id] = (capture_id, fp, (meta.gantry_x, meta.gantry_y), inputs)
         self.repo.save_capture(capture_id, meta.mission_id, meta.seq, meta.model_dump(by_alias=True), frame_path, idmask_path, hashlib.sha1(fp.tobytes()).hexdigest(), duplicate_of)
 
         quality = analyze(img)
@@ -142,7 +149,7 @@ class PerceptionPipeline:
         if not meta.camera_online:
             notes.append("camera offline: nothing to analyse")
         elif duplicate_of:
-            for s in self.repo.segmentations_for(duplicate_of):
+            for s in reusable:
                 reused = s.model_copy(update={"id": new_id("seg"), "capture_id": capture_id, "status": "REUSED", "latency_ms": None})
                 self.repo.save_segmentation(reused)
                 segmentations.append(reused)
