@@ -1,0 +1,359 @@
+{
+  "generatedAt": "2026-11-01T22:24:23+00:00",
+  "metaConfigured": false,
+  "parsing": {
+    "offline": {
+      "provider": "OFFLINE_RULE_PARSER",
+      "summary": {
+        "cases": 12,
+        "succeeded": 12,
+        "allFieldsCorrect": 4,
+        "fieldAccuracy": {
+          "objective": 1.0,
+          "targets": 0.333,
+          "scan_pattern": 0.917,
+          "reduce_speed_on_degradation": 1.0,
+          "stop_on_unsafe_visibility": 0.917
+        },
+        "meanTargetPrecision": 0.695,
+        "meanTargetRecall": 0.875
+      },
+      "cases": [
+        {
+          "id": "demo",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": false,
+            "targetPrecision": 0.667,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "foreign_object",
+                "loose_cable",
+                "pipe_joint"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "brief",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": false,
+            "targetPrecision": 0.667,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "foreign_object",
+                "loose_cable",
+                "pipe_joint"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "rtl-valve",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": true,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": true,
+            "targetPrecision": 1.0,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "pipe_joint",
+                "valve"
+              ],
+              "scan_pattern": "right_to_left",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "survey-zigzag",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": false,
+            "targetPrecision": 0.5,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "area_survey",
+              "targets": [
+                "foreign_object",
+                "loose_cable"
+              ],
+              "scan_pattern": "serpentine",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "fell-in",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": true,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": true,
+            "targetPrecision": 1.0,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "target_search",
+              "targets": [
+                "foreign_object"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "keep-going",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": false
+            },
+            "allCorrect": false,
+            "targetPrecision": 0.5,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "loose_cable",
+                "pipe_joint"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "no-slow",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": false,
+            "targetPrecision": 0.5,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "debris",
+                "pipe_joint"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": false,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "panel",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": false,
+            "targetPrecision": 1.0,
+            "targetRecall": 0.5,
+            "got": {
+              "objective": "target_search",
+              "targets": [
+                "inspection_panel"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "hose",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": false,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": false,
+            "targetPrecision": 0.0,
+            "targetRecall": 0.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "pipe_joint"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "joints-only",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": true,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": true,
+            "targetPrecision": 1.0,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "pipe_joint"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "rocks-cables",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": true,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": true,
+            "targetPrecision": 1.0,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "area_survey",
+              "targets": [
+                "debris",
+                "loose_cable"
+              ],
+              "scan_pattern": "serpentine",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        },
+        {
+          "id": "pause-murky",
+          "status": 200,
+          "provider": "OFFLINE_RULE_PARSER",
+          "score": {
+            "fields": {
+              "objective": true,
+              "targets": false,
+              "scan_pattern": true,
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            },
+            "allCorrect": false,
+            "targetPrecision": 0.5,
+            "targetRecall": 1.0,
+            "got": {
+              "objective": "pipeline_inspection",
+              "targets": [
+                "foreign_object",
+                "pipe_joint"
+              ],
+              "scan_pattern": "left_to_right",
+              "reduce_speed_on_degradation": true,
+              "stop_on_unsafe_visibility": true
+            }
+          }
+        }
+      ]
+    },
+    "spark": {
+      "classification": "NOT_RUN",
+      "reason": "MODEL_API_KEY not set"
+    }
+  },
+  "voiceVsManual": {
+    "classification": "NOT_RUN",
+    "reason": "MODEL_API_KEY not set"
+  },
+  "segmentation": {
+    "classification": "NOT_RUN",
+    "reason": "MODEL_API_KEY not set"
+  }
+}

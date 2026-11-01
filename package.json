@@ -14,7 +14,9 @@
     "e2e:update": "playwright test --update-snapshots",
     "dev:all": "node scripts/dev.mjs",
     "backend": "cd backend && .venv/bin/uvicorn app.main:app --port 8000",
-    "backend:test": "cd backend && .venv/bin/python -m pytest -q"
+    "backend:test": "cd backend && .venv/bin/python -m pytest -q",
+    "eval:adaptive": "tsx scripts/evaluate-adaptive.ts",
+    "eval:meta": "cd backend && .venv/bin/python -m app.evaluation"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
