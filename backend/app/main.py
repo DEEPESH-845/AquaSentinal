@@ -1,0 +1,452 @@
+"""AquaSentinal backend: FastAPI app, routes and WebSockets. docs/ARCHITECTURE.md lists every contract.
+
+Run: uvicorn app.main:app --port 8000  (from backend/)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any
+
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import ValidationError
+
+from .config import Settings, load_settings
+from .db import Repository
+from .events import EventBus
+from .geometry import capture_size, perception_defaults, travel
+from .hardware.camera import CameraManager
+from .hardware.drivers import DriverFault, SerialGantryDriver, SimulatedGantryDriver, open_serial
+from .hardware.motion import InterlockError, MotionController
+from .meta.client import MetaAPIError, MetaClient
+from .meta.sam import Sam
+from .meta.spark import Spark
+from .meta.voice import Voice
+from .mission.service import MissionError, MissionService
+from .perception.pipeline import PerceptionPipeline
+from .reporting import build_report, to_markdown
+from .schemas import (
+    CaptureMeta,
+    CommandEnvelope,
+    InterpretRequest,
+    InterpretResponse,
+    MissionSpec,
+    ObservationCreate,
+    SegmentRequest,
+    StartRequest,
+    TranscriptResult,
+    TwinMissionResult,
+)
+
+VERSION = "1.0.0"
+log = logging.getLogger("aquasentinal")
+MAX_FRAME_BYTES = 4 * 1024 * 1024
+
+
+@dataclass
+class Services:
+    settings: Settings
+    repo: Repository
+    events: EventBus
+    meta: MetaClient | None
+    spark: Spark | None
+    sam: Sam | None
+    voice: Voice | None
+    pipeline: PerceptionPipeline
+    motion: MotionController
+    camera: CameraManager
+    missions: MissionService
+    sim_driver: SimulatedGantryDriver | None
+    started_at: float
+
+
+def build_services(settings: Settings, meta_transport=None, serial_factory=None) -> Services:
+    repo = Repository(settings.sqlite_path, settings.data_dir)
+    events = EventBus()
+    meta = spark = sam = voice = None
+    if settings.meta_available:
+        meta = MetaClient(settings.model_api_key, settings.meta_base_url, timeout_s=settings.request_timeout_s, max_retries=settings.max_retries, transport=meta_transport)
+        spark, sam, voice = Spark(meta, settings.spark_model), Sam(meta, settings.sam_model), Voice(meta, settings.voice_model)
+    hardware = settings.app_mode == "HARDWARE" and settings.hardware_enable and bool(settings.serial_port or serial_factory)
+    sim_driver = None
+    if hardware:
+        driver = SerialGantryDriver(serial_factory or open_serial(settings.serial_port, settings.serial_baud))
+    else:
+        driver = sim_driver = SimulatedGantryDriver()
+    motion = MotionController(driver, events, hardware=hardware)
+    camera = CameraManager(settings.camera_device if settings.app_mode == "HARDWARE" else "")
+    pipeline = PerceptionPipeline(settings, repo, events, spark, sam)
+
+    async def hw_status() -> dict:
+        return motion.snapshot()
+
+    missions = MissionService(repo, events, spark, pipeline, hw_status)
+    return Services(settings, repo, events, meta, spark, sam, voice, pipeline, motion, camera, missions, sim_driver, time.time())
+
+
+def create_app(settings: Settings | None = None, *, meta_transport=None, serial_factory=None) -> FastAPI:
+    settings = settings or load_settings()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        s = build_services(settings, meta_transport, serial_factory)
+        app.state.s = s
+        tasks: list[asyncio.Task] = []
+        if s.sim_driver is not None:
+            async def advance() -> None:  # the simulated driver runs in real time
+                last = time.monotonic()
+                while True:
+                    await asyncio.sleep(1 / 60)
+                    now = time.monotonic()
+                    s.sim_driver.advance(now - last)  # type: ignore[union-attr]
+                    last = now
+
+            tasks.append(asyncio.create_task(advance()))
+        s.motion.start()
+        s.camera.start_device()
+        if settings.app_mode == "HARDWARE" and not s.motion.hardware:
+            log.warning("APP_MODE=HARDWARE but AQUA_HARDWARE_ENABLE is false or no serial port is set: using the simulated driver")
+        try:
+            yield
+        finally:
+            for t in tasks:
+                t.cancel()
+            await s.motion.shutdown()
+            s.camera.stop()
+            if s.meta:
+                await s.meta.aclose()
+            s.repo.close()
+
+    app = FastAPI(title="AquaSentinal", version=VERSION, lifespan=lifespan)
+    app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["*"], allow_headers=["*"])
+
+    def S(request: Request) -> Services:
+        return request.app.state.s
+
+    @app.exception_handler(MissionError)
+    async def _mission_error(_: Request, e: MissionError):
+        return JSONResponse({"error": str(e), "detail": e.detail}, status_code=e.status)
+
+    @app.exception_handler(MetaAPIError)
+    async def _meta_error(_: Request, e: MetaAPIError):
+        status = e.status if 400 <= e.status < 600 else 502
+        return JSONResponse({"error": str(e), "detail": e.public()}, status_code=status)
+
+    @app.exception_handler(InterlockError)
+    async def _interlock(_: Request, e: InterlockError):
+        return JSONResponse({"error": str(e), "interlock": True}, status_code=409)
+
+    # ------------------------------------------------------------ system
+
+    @app.get("/api/health")
+    async def health(request: Request):
+        s = S(request)
+        return {"status": "ok", "version": VERSION, "db": s.repo.ping(), "uptimeS": round(time.time() - s.started_at, 1)}
+
+    def providers(s: Services) -> dict[str, Any]:
+        live = "LIVE" if s.meta else "OFFLINE"
+        return {
+            "spark": {"status": live, "model": settings.spark_model, "fallback": None if s.meta else "OFFLINE_RULE_PARSER"},
+            "sam": {"status": live, "model": settings.sam_model, "fallback": None if s.meta else "SIM_DETECTOR + OFFLINE_FIXTURE masks"},
+            "voice": {"status": live, "model": settings.voice_model, "fallback": None if s.meta else "text input"},
+        }
+
+    @app.get("/api/system/status")
+    async def system_status(request: Request):
+        s = S(request)
+        return {
+            "version": VERSION,
+            "mode": settings.app_mode,
+            "hardwareEnabled": settings.hardware_enable,
+            "hardwareActive": s.motion.hardware,
+            "providers": providers(s),
+            "usage": s.meta.usage.snapshot() if s.meta else {},
+            "inference": {"active": s.pipeline.queue.active, "concurrency": settings.sam_concurrency},
+            "gantry": s.motion.snapshot(),
+            "camera": s.camera.status(),
+            "db": s.repo.ping(),
+            "eventSubscribers": s.events.subscribers,
+        }
+
+    @app.get("/api/system/config")
+    async def system_config():
+        tx, ty = travel()
+        w, h = capture_size()
+        return {**settings.public(), "geometry": {"travelX": tx, "travelY": ty, "captureWidth": w, "captureHeight": h}, "perception": perception_defaults()}
+
+    # ------------------------------------------------------------ voice and AI
+
+    @app.post("/api/voice/transcribe", response_model=TranscriptResult)
+    async def transcribe(request: Request, audio: UploadFile = File(...)):
+        s = S(request)
+        if s.voice is None:
+            raise HTTPException(503, "Muse Voice Transcribe is unavailable: MODEL_API_KEY is not configured. Type the instruction instead.")
+        data = await audio.read()
+        body, latency = await s.voice.transcribe(data)
+        return TranscriptResult(
+            transcript=str(body.get("transcript", "")), provider="MUSE_VOICE_TRANSCRIBE", model=settings.voice_model,
+            session_id=str(body.get("sessionId", "")), audio_duration_ms=int(body.get("audioDurationMs") or 0), latency_ms=round(latency, 1),
+        )
+
+    @app.post("/api/ai/interpret", response_model=InterpretResponse)
+    async def interpret(request: Request, body: InterpretRequest, offline: bool = Query(False, description="force the labelled offline parser")):
+        s = S(request)
+        mission, model = await s.missions.interpret(body, force_offline=offline)
+        return InterpretResponse(mission=mission, provider=mission.provider, model=model)
+
+    @app.post("/api/ai/segment")
+    async def segment(request: Request, body: SegmentRequest):
+        s = S(request)
+        cap = s.repo.get_capture(body.capture_id)
+        if cap is None:
+            raise HTTPException(404, "capture not found")
+        if s.sam is None:
+            raise HTTPException(503, "SAM 3.1 is unavailable: MODEL_API_KEY is not configured")
+        meta = CaptureMeta.model_validate(cap["meta"])
+        jpeg = open(cap["frame_path"], "rb").read()
+        from .perception.pipeline import decode_id_mask
+
+        ids = None
+        if cap["idmask_path"]:
+            w, h = capture_size()
+            ids = decode_id_mask(open(cap["idmask_path"], "rb").read(), w, h)
+        img_w, img_h = capture_size()
+        seg = await s.pipeline._segment_one(meta, cap["id"], jpeg, img_w, img_h, ids, {"phrase": body.prompt, "target_class": None})
+        s.repo.save_segmentation(seg)
+        return seg.model_dump(by_alias=True)
+
+    # ------------------------------------------------------------ missions
+
+    @app.post("/api/missions")
+    async def create_mission(request: Request, spec: MissionSpec):
+        return (await S(request).missions.create(spec)).model_dump(by_alias=True)
+
+    @app.get("/api/missions")
+    async def list_missions(request: Request, limit: int = Query(50, ge=1, le=200)):
+        return [m.model_dump(by_alias=True) for m in S(request).repo.list_missions(limit)]
+
+    @app.get("/api/missions/{mission_id}")
+    async def get_mission(request: Request, mission_id: str):
+        return S(request).missions.get(mission_id).model_dump(by_alias=True)
+
+    @app.post("/api/missions/{mission_id}/plan")
+    async def replan(request: Request, mission_id: str, spec: MissionSpec | None = None):
+        return (await S(request).missions.replan(mission_id, spec)).model_dump(by_alias=True)
+
+    @app.post("/api/missions/{mission_id}/start")
+    async def start(request: Request, mission_id: str, body: StartRequest | None = None):
+        s = S(request)
+        body = body or StartRequest()
+        if body.executor == "BACKEND" and not s.motion.hardware:
+            raise MissionError(409, "the backend executor drives physical hardware; in SIMULATION the digital twin executes missions")
+        if s.motion.estop:
+            raise MissionError(409, "emergency stop is latched")
+        return (await s.missions.set_status(mission_id, "RUNNING", body.executor)).model_dump(by_alias=True)
+
+    for action, status in (("pause", "PAUSED"), ("resume", "RUNNING"), ("stop", "ABORTED")):
+
+        async def handler(request: Request, mission_id: str, _status: str = status):
+            return (await S(request).missions.set_status(mission_id, _status)).model_dump(by_alias=True)
+
+        app.post(f"/api/missions/{{mission_id}}/{action}", name=f"mission_{action}")(handler)
+
+    @app.post("/api/missions/{mission_id}/complete")
+    async def complete(request: Request, mission_id: str, result: TwinMissionResult):
+        return (await S(request).missions.complete(mission_id, result)).model_dump(by_alias=True)
+
+    # ------------------------------------------------------------ inspection
+
+    @app.post("/api/inspection/capture")
+    async def capture(request: Request, meta: str = Form(...), frame: UploadFile = File(...), idmask: UploadFile | None = File(None)):
+        s = S(request)
+        try:
+            m = CaptureMeta.model_validate_json(meta)
+        except ValidationError as e:
+            raise HTTPException(422, e.errors(include_url=False, include_context=False))
+        jpeg = await frame.read()
+        if not jpeg or len(jpeg) > MAX_FRAME_BYTES:
+            raise HTTPException(413, "frame missing or larger than 4 MB")
+        ids = await idmask.read() if idmask else None
+        if ids and len(ids) > MAX_FRAME_BYTES:
+            raise HTTPException(413, "id mask larger than 4 MB")
+        w, h = capture_size()
+        s.camera.push(jpeg, w, h)
+        try:
+            result = await s.pipeline.process(m, jpeg, ids)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        return result.model_dump(by_alias=True)
+
+    @app.get("/api/inspection/frames/{capture_id}")
+    async def frame(request: Request, capture_id: str, kind: str = Query("frame", pattern="^(frame|ids)$")):
+        cap = S(request).repo.get_capture(capture_id)
+        path = cap and (cap["frame_path"] if kind == "frame" else cap["idmask_path"])
+        if not path:
+            raise HTTPException(404, "frame not found")
+        return FileResponse(path, media_type="image/jpeg" if kind == "frame" else "image/png")
+
+    @app.get("/api/inspection/captures/{mission_id}")
+    async def captures(request: Request, mission_id: str):
+        s = S(request)
+        out = []
+        for c in s.repo.captures_for(mission_id):
+            out.append({"id": c["id"], "seq": c["seq"], "meta": c["meta"], "quality": c["quality"], "reasoning": c["reasoning"], "duplicateOf": c["duplicate_of"],
+                        "segmentations": [g.model_dump(by_alias=True) for g in s.repo.segmentations_for(c["id"])]})
+        return out
+
+    @app.post("/api/inspection/observations")
+    async def add_observation(request: Request, body: ObservationCreate):
+        s = S(request)
+        s.missions.get(body.mission_id)
+        from .perception.tracking import Sighting
+
+        asset = s.pipeline.tracker.associate(body.mission_id, Sighting(label=body.label, x=body.x, y=body.y, w=4, h=4, confidence=None))
+        from .db import new_id
+        from .schemas import Observation
+
+        o = Observation(id=new_id("obs"), mission_id=body.mission_id, capture_id=None, asset_id=asset.id, source="OPERATOR", label=body.label, confidence=None,
+                        confidence_source=None, x=body.x, y=body.y, status="OBSERVED", created_at=time.time())
+        s.repo.save_observation(o)
+        return o.model_dump(by_alias=True)
+
+    @app.get("/api/inspection/history")
+    async def history(request: Request, limit: int = Query(30, ge=1, le=200)):
+        s = S(request)
+        out = []
+        for m in s.repo.list_missions(limit):
+            obs = s.repo.observations_for(m.id)
+            out.append({"id": m.id, "createdAt": m.created_at, "status": m.status, "provider": m.provider, "instruction": m.instruction,
+                        "captures": len(s.repo.captures_for(m.id)), "observations": len(obs), "assets": len({o.asset_id for o in obs}), "result": m.result})
+        return out
+
+    @app.get("/api/inspection/assets")
+    async def assets(request: Request):
+        return [a.model_dump(by_alias=True) for a in S(request).repo.assets()]
+
+    @app.get("/api/inspection/{mission_id}/report")
+    async def report(request: Request, mission_id: str, format: str = Query("json", pattern="^(json|md)$")):
+        r = build_report(S(request).repo, mission_id)
+        if r is None:
+            raise HTTPException(404, "mission not found")
+        if format == "md":
+            return PlainTextResponse(to_markdown(r), media_type="text/markdown", headers={"Content-Disposition": f'attachment; filename="{mission_id}.md"'})
+        return r
+
+    @app.post("/api/inspection/{mission_id}/summary")
+    async def regenerate_summary(request: Request, mission_id: str):
+        return await S(request).missions.summarize(mission_id)
+
+    # ------------------------------------------------------------ gantry and telemetry
+
+    async def run_command(s: Services, env: CommandEnvelope) -> dict[str, Any]:
+        c = env.command
+        try:
+            if c.type == "ESTOP":
+                await s.motion.emergency_stop("operator")
+            elif c.type == "CLEAR_ESTOP":
+                await s.motion.clear_estop()
+            elif c.type == "STOP":
+                await s.motion.stop()
+            elif c.type == "HOME":
+                await s.motion.home()
+            elif c.type == "CONNECT":
+                await s.motion.connect()
+            elif c.type == "DISCONNECT":
+                await s.motion.disconnect()
+            elif c.type == "MOVE_TO":
+                await s.motion.move_to(c.x, c.y, c.speed_fraction)  # type: ignore[union-attr]
+            return {"v": 1, "id": env.id, "ok": True, "state": s.motion.snapshot()}
+        except (InterlockError, DriverFault) as e:
+            return {"v": 1, "id": env.id, "ok": False, "error": str(e), "state": s.motion.snapshot()}
+
+    @app.post("/api/gantry/command")
+    async def gantry_command(request: Request, env: CommandEnvelope):
+        return await run_command(S(request), env)
+
+    @app.get("/api/telemetry")
+    async def telemetry(request: Request):
+        s = S(request)
+        await s.motion.check_once()
+        return {"gantry": s.motion.snapshot(), "camera": s.camera.status(), "mode": settings.app_mode}
+
+    @app.get("/api/camera/stream")
+    async def camera_stream(request: Request):
+        return StreamingResponse(S(request).camera.mjpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+    @app.websocket("/ws/telemetry")
+    async def ws_telemetry(ws: WebSocket):
+        await ws.accept()
+        s: Services = ws.app.state.s
+        try:
+            while True:
+                await ws.send_json({"v": 1, "type": "telemetry", "ts": time.time(), "data": {"gantry": s.motion.snapshot(), "camera": s.camera.status()}})
+                await asyncio.sleep(0.2)
+        except (WebSocketDisconnect, RuntimeError):
+            return
+
+    @app.websocket("/ws/events")
+    async def ws_events(ws: WebSocket, since: int = 0):
+        await ws.accept()
+        s: Services = ws.app.state.s
+        q = s.events.subscribe()
+        try:
+            await ws.send_json(s.events.envelope("hello", {"version": VERSION, "mode": settings.app_mode}))
+            for env in s.events.since(since):
+                await ws.send_json(env)
+            recv = asyncio.create_task(ws.receive_text())
+            while True:
+                get = asyncio.create_task(q.get())
+                done, _ = await asyncio.wait({get, recv}, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+                if not done:
+                    get.cancel()
+                    await ws.send_json(s.events.envelope("heartbeat", {}))
+                    continue
+                if get in done:
+                    await ws.send_json(get.result())
+                else:
+                    get.cancel()
+                if recv in done:
+                    raw = recv.result()
+                    try:
+                        msg = json.loads(raw)
+                        kind = msg.get("type") if isinstance(msg, dict) else None
+                    except json.JSONDecodeError:
+                        kind = None
+                    if kind == "ping":
+                        await ws.send_json(s.events.envelope("pong", {}))
+                    elif kind != "ack":
+                        await ws.send_json(s.events.envelope("error", {"message": "unrecognised message; this socket only accepts ping"}))
+                    recv = asyncio.create_task(ws.receive_text())
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            s.events.unsubscribe(q)
+
+    @app.websocket("/ws/commands")
+    async def ws_commands(ws: WebSocket):
+        await ws.accept()
+        s: Services = ws.app.state.s
+        try:
+            while True:
+                raw = await ws.receive_text()
+                try:
+                    env = CommandEnvelope.model_validate_json(raw)
+                except ValidationError as e:
+                    await ws.send_json({"v": 1, "ok": False, "error": "invalid command", "detail": e.errors(include_url=False, include_context=False)})
+                    continue
+                await ws.send_json(await run_command(s, env))
+        except (WebSocketDisconnect, RuntimeError):
+            return
+
+    return app
+
+
+app = create_app()
