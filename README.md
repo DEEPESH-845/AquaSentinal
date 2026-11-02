@@ -50,6 +50,11 @@ The backend reads its configuration from the process environment only; no `.env`
 Export the variables listed in `.env.example` in the shell that starts the backend, or prefix the command, for example `MODEL_API_KEY=... npm run dev:all`.
 Without `MODEL_API_KEY` everything runs in labelled offline mode.
 
+## Explore it
+
+- http://localhost:3000/walkthrough is a scroll-driven explanation of the product over the live twin: the problem, the rig, the model pipeline, perception, adaptive control and a measured result.
+- In mission control, Guide in the header (or Guided tour on the Overview card) starts a nine-step tour of the controls; F collapses the panels to give the 3D view the screen.
+
 ## Judge demo
 
 ```bash
@@ -82,7 +87,9 @@ cd backend && .venv/bin/python -m pytest
 ## Layout
 
 ```
-app/                 Next.js shell and design tokens
+app/                 Next.js routes (mission control, walkthrough) and design tokens
+components/walkthrough/  Scroll-driven product walkthrough
+lib/animations/      GSAP registration, context-scoped hook and motion tokens
 components/lab/      Three.js twin: tank, gantry, pipeline objects, overlays, feed and capture renderer
 components/ui/       Mission control, perception, navigation, environment, report, telemetry
 lib/sim/             Deterministic engine: gantry, detector, missions, perception policy, scenarios, demo
@@ -110,4 +117,5 @@ docs/                Audit, migration map, architecture, integration, safety, te
 - [Impact and market](docs/IMPACT_AND_MARKET.md)
 - [Judging readiness](docs/JUDGING_READINESS.md)
 - [Final demo script](docs/FINAL_DEMO_SCRIPT.md), [shot list](docs/DEMO_SHOT_LIST.md), [validation checklist](docs/DEMO_VALIDATION_CHECKLIST.md)
+- [Final product audit](docs/FINAL_PRODUCT_AUDIT.md) and [UI bug audit](docs/UI_BUG_AUDIT.md)
 - [Roadmap](docs/ROADMAP.md)
