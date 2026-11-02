@@ -2,10 +2,11 @@
 
 import { OrbitControls } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
-import gsap from "gsap";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { gsap } from "@/lib/animations/gsap";
+import { DUR, prefersReducedMotion } from "@/lib/animations/motion";
 import { CAMERA, GANTRY, TANK, gantryToWorld } from "@/lib/sim/constants";
 import { useSimStore, type CameraPreset } from "@/lib/sim/store";
 import { SHELF } from "./Electronics";
@@ -70,10 +71,6 @@ const PRESETS: Record<CameraPreset, Preset> = {
 };
 export const INITIAL_CAMERA: V3 = [1.9, 1.35, 1.7];
 
-// Camera moves are wall-clock: without this a slow frame makes GSAP step 33 ms per frame and a 1.4 s
-// preset move can take tens of seconds on a struggling GPU.
-gsap.ticker.lagSmoothing(0);
-
 /** Carriage reference point: the lens, on the mast axis. */
 function carriagePoint(out: THREE.Vector3) {
   const g = useSimStore.getState().engine.gantry;
@@ -93,7 +90,8 @@ const fUp = new THREE.Vector3();
  */
 function fitRect(width: number, height: number) {
   const r = freeRect(width, height);
-  const cx = width / 2;
+  // mission control centres the rig on the frame between its side panels; a stage page centres it on the stage
+  const cx = r.stage ? (r.x0 + r.x1) / 2 : width / 2;
   const cy = (r.y0 + r.y1) / 2;
   const hw = Math.min(cx - r.x0, r.x1 - cx);
   const hh = (r.y1 - r.y0) / 2;
@@ -198,7 +196,7 @@ export function CameraRig() {
     // A resize or a card height change refits the preset unless the user has taken the camera; a preset change always does.
     if (preset === lastPreset.current && userMoved.current) return;
     // the first fit, and any layout settling in the first second after mount, snaps instead of tweening
-    const instant = lastPreset.current === null || performance.now() - mountedAt.current < 1000;
+    const instant = lastPreset.current === null || performance.now() - mountedAt.current < 1000 || prefersReducedMotion();
     lastPreset.current = preset;
     userMoved.current = false;
     tween.current?.kill();
@@ -221,7 +219,7 @@ export function CameraRig() {
     // Follow shots re-read the carriage on every step, so the camera lands attached even if it moved mid-tween.
     const tl = gsap.to(s, {
       t: 1,
-      duration: 1.4,
+      duration: DUR.cinematic + 0.3,
       ease: "power2.inOut",
       onUpdate: () => {
         if (origin) {

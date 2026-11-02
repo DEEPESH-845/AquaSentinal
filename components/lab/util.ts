@@ -4,11 +4,12 @@ import { useEffect } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { useSimStore, type ComponentId } from "@/lib/sim/store";
+import { C } from "@/lib/theme";
 
 /** Scene 02 highlight tint. Teal, restrained. */
-export const HIGHLIGHT_COLOR = new THREE.Color("#3db9b0");
-export const AMBER = "#f2a93b";
-export const TEAL = "#3db9b0";
+export const HIGHLIGHT_COLOR = new THREE.Color(C.teal);
+export const AMBER = C.amber;
+export const TEAL = C.teal;
 
 type Emissive = THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial;
 
@@ -51,6 +52,8 @@ export interface FreeRect {
   y0: number;
   x1: number;
   y1: number;
+  /** true when a page named this area as the stage: the subject centres on it, not on the canvas */
+  stage?: boolean;
 }
 
 const GAP = 12;
@@ -69,6 +72,9 @@ const rectOf = (name: string) => document.querySelector(`[data-lab="${name}"]`)?
  */
 export function measureFreeRect(): FreeRect | null {
   if (typeof document === "undefined") return null;
+  // A page without the lab overlay (the walkthrough) names the area the subject should fill directly.
+  const stage = rectOf("stage");
+  if (stage) return { x0: stage.left + GAP, y0: stage.top + GAP, x1: stage.right - GAP, y1: stage.bottom - GAP, stage: true };
   const header = rectOf("header");
   const nav = rectOf("nav");
   const column = rectOf("column");
@@ -126,7 +132,8 @@ export function observeOverlay(onChange: (r: FreeRect) => void, threshold = 80):
   let raf = 0;
   // The overlay is a sibling React tree of the canvas; poll a frame at a time until its elements exist.
   const attach = () => {
-    const els = ["header", "nav", "column", "card"].map((name) => document.querySelector(`[data-lab="${name}"]`));
+    const stage = document.querySelector('[data-lab="stage"]');
+    const els = stage ? [stage] : ["header", "nav", "column", "card"].map((name) => document.querySelector(`[data-lab="${name}"]`));
     if (els.some((el) => !el)) {
       raf = requestAnimationFrame(attach);
       return;
