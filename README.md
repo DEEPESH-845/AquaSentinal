@@ -43,8 +43,12 @@ To run the two halves separately:
 
 ```bash
 npm run dev
-cd backend && .venv/bin/uvicorn app.main:app --port 8000
+npm run backend:dev            # creates backend/.venv on first run, reinstalls only when requirements change, auto-reloads
+npm run backend:dev -- --fresh # same, starting from an empty local database (backend/data)
 ```
+
+`npm run backend:dev -- --help` lists the options (`--port`, `--fresh`, `--no-reload`).
+Local settings such as `MODEL_API_KEY` can go in `backend/.env.local` (gitignored, same keys as `.env.example`); variables set in the shell take precedence.
 
 The backend reads its configuration from the process environment only; no `.env` file is loaded.
 Export the variables listed in `.env.example` in the shell that starts the backend, or prefix the command, for example `MODEL_API_KEY=... npm run dev:all`.
