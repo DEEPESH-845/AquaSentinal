@@ -2,7 +2,7 @@ import { expect, test } from "./lab";
 
 const SCENES = [
   [1, "Overview", /Underwater inspection lab/],
-  [2, "System", /System architecture/],
+  [2, "System", /System health and architecture/],
   [3, "Perception", /AI perception/],
   [4, "Navigation", /Gantry and navigation/],
   [5, "Mission", /AI mission control/],

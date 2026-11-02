@@ -22,7 +22,8 @@ const backendEstop = async (page: Page) => (await (await page.request.get(`${API
 test.describe("red team", () => {
   test("rapid random clicks across scenes and buttons keep the twin sane and reset cleanly", async ({ lab, page, audit }) => {
     test.setTimeout(240_000);
-    audit.allow.push(REFUSED);
+    // a random click can land on Cancel planning, which aborts the planning request on purpose
+    audit.allow.push(REFUSED, /api\/ai\/interpret net::ERR_ABORTED/);
     await lab.openOnline();
     let r = 7;
     const rand = () => ((r = (r * 1664525 + 1013904223) >>> 0) / 2 ** 32);
