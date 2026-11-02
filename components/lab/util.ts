@@ -82,8 +82,12 @@ export function measureFreeRect(): FreeRect | null {
   if (!header || !nav || !column || !card) return null;
   const W = window.innerWidth;
   const compact = nav.width > nav.height;
+  // compact: the feed sits above the strip, unless the screen is too short and they sit side by side (phone on its side)
+  const sideBySide = column.bottom + 40 > nav.top;
   return compact
-    ? { x0: GAP, y0: column.bottom + GAP, x1: W - GAP, y1: nav.top - GAP }
+    ? sideBySide
+      ? { x0: GAP, y0: header.bottom + GAP, x1: column.left - GAP, y1: nav.top - GAP }
+      : { x0: GAP, y0: column.bottom + GAP, x1: W - GAP, y1: nav.top - GAP }
     : { x0: nav.right + GAP, y0: header.bottom + GAP, x1: column.left - GAP, y1: card.top - GAP };
 }
 

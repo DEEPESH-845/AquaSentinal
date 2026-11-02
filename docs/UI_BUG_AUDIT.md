@@ -23,6 +23,10 @@ No P0 defect was found: the application loaded on every route and viewport with 
 | UB-13 | P3 | `/` | Feed corner tag read "CAM D", an internal camera preset id | Fixed |
 | UB-14 | P3 | all | `THREE.Clock` deprecation warning in the browser console | Open: emitted by @react-three/fiber 9.6 with three 0.184 |
 | UB-15 | P2 | `/walkthrough` | Scrolling section 05 changed the water under a mission running in mission control | Fixed, regression test |
+| UB-17 | P2 | `/` 760 to 999 px | Scene strip overflowed by 178 px; "08 Intelligence" unreachable without scrolling | Fixed, regression test |
+| UB-18 | P1 | `/` phones in landscape | Context card stacked over the camera feed at 667 x 375 and 844 x 390 | Fixed, regression test |
+| UB-19 | P2 | `/` 320 px | Brand truncated to "AQUASE"; scene strip 4 to 26 px too wide | Fixed, regression test |
+| UB-20 | P3 | `/` below 1000 px | Compact feed header pushed the position readout past the panel edge | Fixed |
 | UB-16 | P2 | e2e | Gantry stop test read target and position after a click while the twin kept ticking in real time | Fixed: deterministic assertion |
 
 ## UB-01 Stale provider status after the backend is lost
@@ -111,3 +115,13 @@ Regression test: "the walkthrough leaves a running mission's water alone".
 
 `gantry.spec.ts` clicked Stop and then compared the target with the position, but the twin keeps running in real time and decelerates past the stop point, so any frame between the click and the read failed it; extra panels made that frame more likely.
 Fix: the test records the stop point, fast-forwards the engine deterministically, and asserts that the target stayed at the stop point and the carriage settled on it instead of continuing to the clicked corner.
+
+## UB-17 to UB-20 Responsive sweep
+
+A second sweep added 2560 x 1440, 900 x 700, 667 x 375, 844 x 390 and 320 x 568 to the earlier sizes.
+UB-17: below 1000 px the strip showed every scene name, which only fits below 760 px where names were already hidden; inactive names are now hidden below 1000 px, the strip can scroll as a last resort, and below 400 px the active name becomes screen-reader-only (the card title names the scene).
+UB-18: the compact layout stacks the strip and card under the feed, which assumes a portrait screen; a `short` variant (height up to 520 px, width under 1000 px) puts the card beside the feed column instead, and the 3D framing detects the side-by-side case and frames the tank left of the feed.
+UB-19: the header buttons and brand get tighter spacing below 380 px.
+UB-20: the feed's provenance tag reads TWIN in compact feeds and the readout truncates.
+On displays of 2200 x 1200 CSS pixels or more the instrument overlay is scaled by 1.25 so 10 px labels stay legible; the feed pass and the 3D framing read zoomed rects correctly.
+`e2e/responsive.spec.ts` now runs 11 viewports and also asserts that the scene strip fits.

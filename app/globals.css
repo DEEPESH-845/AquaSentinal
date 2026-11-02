@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* short landscape screens (phones on their side): panels go side by side instead of stacking */
+@custom-variant short (@media (max-height: 520px) and (max-width: 999px));
+
 @theme {
   /* AquaSentinal tokens: marine instrumentation, not startup. Mirrored for SVG and Three.js in lib/theme.ts. */
   --color-ground: #080f16;
@@ -61,7 +64,20 @@
   }
 }
 
+/* very large desktop displays at 1x: scale the instrument overlay so text stays readable from a normal distance */
+@media (min-width: 2200px) and (min-height: 1200px) {
+  [data-lab-root] {
+    zoom: 1.25;
+  }
+}
+
 @layer utilities {
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
   /* Engineering panel: flat, 1px line, a faint top light, no blur stack. */
   .panel {
     background:

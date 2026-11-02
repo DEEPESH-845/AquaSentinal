@@ -105,6 +105,12 @@ A spotlight ring glides between targets and dims the rest without blocking it, s
 Steps that ask the user to do something show "Waiting for you" until the stores show it done; nothing is claimed that the user has not done.
 Next, Back, Skip, progress, arrow keys and Escape; restartable from the header or the Overview card.
 
+## Responsiveness
+
+Verified at 2560 x 1440, 1920 x 1080, 1600 x 900, 1440 x 900, 1366 x 768, 1280 x 800, 1280 x 720, 1024 x 768, 900 x 700, 768 x 1024, 600 x 960, 844 x 390, 667 x 375, 390 x 844, 375 x 812 and 320 x 568 (UB-03, UB-04 and UB-17 to UB-20).
+Desktop keeps the rail, centre twin, right column and bottom card; below 1000 px the strip and card stack under the feed; phones on their side put the card beside the feed; very large displays scale the overlay by 1.25.
+At every tested size the card stays inside the viewport and clear of the feed, the scene strip fits, the brand is whole and nothing scrolls horizontally, on both routes.
+
 ## Accessibility
 
 Visible focus ring everywhere; `aria-current` on the active scene; radio-group semantics and arrow keys on the segmented control; the compare divider and walkthrough controls are native range inputs; the tour popover is a labelled non-modal dialog that takes focus; the closing overlay is a modal dialog that returns focus; health and state are always written out, never colour or animation alone.

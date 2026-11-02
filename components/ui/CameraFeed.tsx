@@ -67,14 +67,16 @@ export function CameraFeed() {
       <div className="flex items-center justify-between gap-2 border-b border-line px-2.5 py-1.5">
         <div className="flex items-center gap-2 whitespace-nowrap">
           <span className="label text-text">Camera feed</span>
-          <span className="sim-tag">DIGITAL TWIN</span>
+          <span className="sim-tag" title="Rendered by the digital twin, not a physical camera">
+            <span className="max-[999px]:hidden">DIGITAL </span>TWIN
+          </span>
         </div>
         <span className="value whitespace-nowrap text-[9px] text-muted max-[999px]:hidden">
           {CAMERA.fps} FPS f{frame}
           {wide && ` ${CAMERA.resolution.replace(" (simulated)", "")}`}
         </span>
         {/* compact column: the readout moves up here so it cannot collide with box tags in a 176 or 220 px feed */}
-        <span className="value whitespace-nowrap text-[10px] text-teal min-[1000px]:hidden">
+        <span className="value min-w-0 truncate whitespace-nowrap text-[10px] text-teal min-[1000px]:hidden">
           X {f1(x)}&nbsp;&nbsp;Y {f1(y)}
         </span>
       </div>

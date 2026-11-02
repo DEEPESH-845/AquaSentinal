@@ -97,6 +97,7 @@ export function LabUI() {
   return (
     <MotionConfig reducedMotion="user">
       <div
+        data-lab-root
         className="pointer-events-none absolute inset-0 select-none overflow-hidden max-[999px]:flex max-[999px]:flex-col"
         style={{ "--col-w": `${columnWidth}px` } as React.CSSProperties}
       >
@@ -106,7 +107,7 @@ export function LabUI() {
         <nav
           data-lab="nav"
           data-tour="nav"
-          className="pointer-events-auto absolute left-4 top-1/2 flex w-[148px] -translate-y-1/2 flex-col gap-0.5 border border-line bg-ground/70 py-1.5 max-[999px]:static max-[999px]:mx-auto max-[999px]:mt-auto max-[999px]:w-[calc(100%-2rem)] max-[999px]:max-w-[620px] max-[999px]:translate-y-0 max-[999px]:flex-row max-[999px]:gap-0 max-[999px]:border-b-0 max-[999px]:bg-panel/92 max-[999px]:px-1 max-[999px]:py-0"
+          className="pointer-events-auto absolute left-4 top-1/2 flex w-[148px] -translate-y-1/2 flex-col gap-0.5 border border-line bg-ground/70 py-1.5 max-[999px]:static max-[999px]:mx-auto max-[999px]:mt-auto max-[999px]:w-[calc(100%-2rem)] max-[999px]:max-w-[620px] max-[999px]:translate-y-0 max-[999px]:flex-row max-[999px]:gap-0 max-[999px]:border-b-0 max-[999px]:bg-panel/92 max-[999px]:px-1 max-[999px]:py-0 max-[999px]:overflow-x-auto no-scrollbar short:ml-4 short:mr-[252px] short:w-auto short:max-w-none max-[759px]:short:mr-[208px]"
           aria-label="Scenes"
         >
           {SCENES.map((s) => {
@@ -119,13 +120,13 @@ export function LabUI() {
                 aria-current={on ? "page" : undefined}
                 onClick={() => setScene(s.id)}
                 className={clsx(
-                  "group relative flex items-center gap-2 border-l-2 py-1 pl-2 pr-3 text-left transition-colors duration-150 max-[999px]:border-b-2 max-[999px]:border-l-0 max-[999px]:px-2 max-[999px]:py-2",
+                  "group relative flex items-center gap-2 border-l-2 py-1 pl-2 pr-3 text-left transition-colors duration-150 max-[999px]:border-b-2 max-[999px]:border-l-0 max-[999px]:px-2 max-[999px]:py-2 max-[399px]:flex-1 max-[399px]:justify-center max-[399px]:px-1",
                   on ? "border-teal bg-teal/[0.06]" : "border-transparent hover:border-line-strong hover:bg-panel-2/50",
                   demoActive && "cursor-default opacity-50",
                 )}
               >
                 <span className={clsx("value text-[10px]", on ? "text-teal" : "text-dim")}>{String(s.id).padStart(2, "0")}</span>
-                <span className={clsx("label", on ? "text-teal" : "text-muted group-hover:text-text max-[759px]:hidden")}>{s.name}</span>
+                <span className={clsx("label", on ? "text-teal max-[399px]:sr-only" : "text-muted group-hover:text-text max-[999px]:hidden")}>{s.name}</span>
               </button>
             );
           })}
@@ -158,13 +159,15 @@ export function LabUI() {
             wide ? "max-w-[780px]" : "max-w-[620px]",
             "max-[1259px]:max-w-none",
             "max-[999px]:static max-[999px]:mb-4 max-[999px]:w-[calc(100%-2rem)] max-[999px]:max-w-[620px]",
+            // phones on their side: the card sits left of the feed column instead of under it
+            "short:mb-2 short:ml-4 short:mr-[252px] short:w-auto short:max-w-none max-[759px]:short:mr-[208px]",
           )}
         >
           <AnimatePresence mode="wait" initial={false}>
             {cardOpen ? (
               <motion.div
                 key={demoActive ? "demo" : scene}
-                className="panel pointer-events-auto relative max-h-[calc(100dvh-9rem)] overflow-y-auto p-4 max-[999px]:max-h-[55dvh] max-[759px]:max-h-[42dvh]"
+                className="panel pointer-events-auto relative max-h-[calc(100dvh-9rem)] overflow-y-auto p-4 max-[999px]:max-h-[55dvh] max-[759px]:max-h-[42dvh] short:max-h-[calc(100dvh-6.5rem)]! short:p-3"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
@@ -256,7 +259,7 @@ function TopBar() {
   return (
     <header data-lab="header" className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center justify-between gap-4 border-b border-line bg-ground/70 px-4 backdrop-blur-[2px] max-[999px]:static max-[999px]:shrink-0 max-[439px]:gap-2 max-[439px]:px-3">
       <div className="pointer-events-auto flex min-w-0 items-center gap-4 overflow-hidden">
-        <span className="whitespace-nowrap font-mono text-[13px] font-semibold tracking-[0.28em] text-text max-[439px]:tracking-[0.12em]">AQUASENTINAL</span>
+        <span className="whitespace-nowrap font-mono text-[13px] font-semibold tracking-[0.28em] text-text max-[439px]:tracking-[0.12em] max-[379px]:text-[11px] max-[379px]:tracking-[0.04em]">AQUASENTINAL</span>
         <span className="h-4 w-px bg-line-strong max-[1279px]:hidden" />
         <span className="label whitespace-nowrap text-teal max-[1279px]:hidden">Mission control</span>
         <Link href="/walkthrough" className="label whitespace-nowrap transition-colors hover:text-text max-[1099px]:hidden">
@@ -266,7 +269,7 @@ function TopBar() {
           <Compass size={12} /> Guide
         </button>
       </div>
-      <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+      <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 max-[379px]:gap-1 max-[379px]:[&_.btn]:px-2">
         {/* secondary status, dropped below 1000 px so the brand always has room. Unknown is grey, never green. */}
         <div className="contents max-[999px]:hidden">
           <StatusChip name="Mode" value={sys?.mode ?? "UNKNOWN"} tone={!sys ? "dim" : sys.hardwareActive ? "amber" : "teal"} title={sys ? `Backend reports ${sys.mode}` : "Backend status not read yet"} />
