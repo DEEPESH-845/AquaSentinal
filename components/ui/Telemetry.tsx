@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useSimStore } from "@/lib/sim/store";
@@ -46,12 +47,22 @@ export function Telemetry() {
     }),
   );
 
+  const open = useSimStore((s) => s.panels.telemetry);
+  const setPanels = useSimStore((s) => s.setPanels);
+
   return (
     <div className="panel">
-      <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5">
+      <div className={clsx("flex items-center justify-between gap-2 px-2.5 py-1.5", open && "border-b border-line")}>
         <span className="label text-text">Telemetry</span>
-        <span className="sim-tag">SIMULATED</span>
+        <span className="flex items-center gap-1.5">
+          <span className="sim-tag">SIMULATED</span>
+          <button type="button" className="btn btn-icon p-0.5!" aria-expanded={open} aria-label={open ? "Collapse telemetry" : "Expand telemetry"} onClick={() => setPanels({ telemetry: !open })}>
+            {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+        </span>
       </div>
+      {open && (
+        <>
       <Section title="Gantry">
         <Row k="X" v={`${f1(g.x)} cm`} />
         <Row k="Y" v={`${f1(g.y)} cm`} />
@@ -86,6 +97,35 @@ export function Telemetry() {
         <Row k="In flight" v={ai.active} />
         <Row k="Sim time" v={`${f1(time)} s`} />
       </Section>
+        </>
+      )}
+    </div>
+  );
+}
+
+const KIND_TONE: Record<string, string> = { PHASE: "text-text", WAYPOINT: "text-muted", DETECT: "text-amber", TARGET: "text-amber", RL: "text-dim", RESULT: "text-teal" };
+
+/** The twin's own event log: what the controller did and when, in sim seconds. Newest first. */
+export function MissionLog() {
+  const events = useSimStore((s) => s.events);
+  const last = events.slice(-7).reverse();
+  return (
+    <div className="panel" data-testid="mission-log">
+      <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5">
+        <span className="label text-text">Twin event log</span>
+        <span className="sim-tag">SIMULATED</span>
+      </div>
+      <ol className="px-2.5 py-1" aria-live="off">
+        {last.length === 0 && <li className="py-0.5 text-[11px] text-dim">No events yet. Move the gantry or run a mission.</li>}
+        {last.map((e, i) => (
+          <li key={`${e.t}-${i}-${e.text}`} className="grid grid-cols-[38px_1fr] gap-x-2 py-[2px]">
+            <span className="value text-[10px] text-dim">{f1(e.t)}s</span>
+            <span className={clsx("value truncate text-[10px]", KIND_TONE[e.kind])} title={e.text}>
+              {e.text}
+            </span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

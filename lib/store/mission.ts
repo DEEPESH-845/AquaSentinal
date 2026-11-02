@@ -38,9 +38,14 @@ export type TranscriptView = TranscriptResult & { source: VoiceInputSource };
 /** Prepared audio of the demo instruction (synthetic speech, macOS `say`). Always labelled RECORDED_INPUT. */
 export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
 
+let interpretCtrl: AbortController | null = null;
+
 interface MissionStore {
   backend: BackendState;
+  /** null until the first successful status read, and again whenever the backend stops answering: unknown is never shown as healthy */
   system: SystemStatus | null;
+  /** wall-clock ms of the last successful status read */
+  lastStatusOkAt: number | null;
   instruction: string;
   voice: VoiceState;
   transcript: TranscriptView | null;
@@ -69,6 +74,8 @@ interface MissionStore {
   transcribeRecorded: () => Promise<string | null>;
   refreshEvidence: () => Promise<void>;
   interpret: (offline?: boolean) => Promise<MissionRecord | null>;
+  /** Aborts a pending planning request. The backend may still record the plan; it is not shown and cannot run unapproved. */
+  cancelInterpret: () => void;
   discard: () => void;
   approve: () => Promise<boolean>;
   pause: () => void;
@@ -106,6 +113,7 @@ export function twinContext(): TwinContext {
 
 export const useMissionStore = create<MissionStore>((set, get) => ({
   backend: "CONNECTING",
+  lastStatusOkAt: null,
   system: null,
   instruction: "",
   voice: { state: "IDLE" },
@@ -128,9 +136,10 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
 
   refreshStatus: async () => {
     try {
-      set({ system: await api.status(), backend: "ONLINE" });
+      set({ system: await api.status(), backend: "ONLINE", lastStatusOkAt: Date.now() });
     } catch {
-      set({ backend: "OFFLINE" });
+      // a stale status would keep showing providers LIVE behind an unreachable backend
+      set({ backend: "OFFLINE", system: null });
     }
   },
 
@@ -197,18 +206,26 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
       set({ interpretError: "Describe the inspection first." });
       return null;
     }
+    interpretCtrl?.abort();
+    const ctrl = (interpretCtrl = new AbortController());
     set({ interpreting: true, interpretError: null, canFallBack: false, actionError: null });
     try {
-      const r = await api.interpret(text, twinContext(), offline);
+      const r = await api.interpret(text, twinContext(), offline, ctrl.signal);
       set({ mission: r.mission, interpreting: false });
       void get().refreshEvidence();
       return r.mission;
     } catch (e) {
+      if (ctrl.signal.aborted) {
+        if (interpretCtrl === ctrl) set({ interpreting: false, interpretError: "Planning cancelled. Edit the instruction and plan again." });
+        return null;
+      }
       const live = get().system?.providers.spark.status === "LIVE";
       set({ interpreting: false, interpretError: msg(e), canFallBack: live && !offline && e instanceof ApiError && e.status !== 0 });
       return null;
     }
   },
+
+  cancelInterpret: () => interpretCtrl?.abort(),
 
   discard: () => set({ mission: null, interpretError: null, actionError: null }),
 

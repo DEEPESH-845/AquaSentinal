@@ -2,9 +2,11 @@
 
 import clsx from "clsx";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { OctagonX, Play, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronUp, Compass, Maximize2, Minimize2, OctagonX, Play, RotateCcw } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { BEZIER, DUR } from "@/lib/animations/motion";
 import { useSimStore, type SceneId } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
 import { BackendBridge } from "./bridge";
@@ -16,9 +18,10 @@ import { PerceptionCard } from "./perception";
 import { ReportCard } from "./report";
 import { EnvironmentCard, GantryCard, OverviewCard, SystemCard } from "./scenes";
 import { Btn, Dot } from "./shared";
-import { Telemetry } from "./Telemetry";
+import { MissionLog, Telemetry } from "./Telemetry";
+import { Tour } from "./tour";
 
-const SCENES: { id: SceneId; name: string }[] = [
+export const SCENES: { id: SceneId; name: string }[] = [
   { id: 1, name: "Overview" },
   { id: 2, name: "System" },
   { id: 3, name: "Perception" },
@@ -45,7 +48,6 @@ const WIDE: Partial<Record<SceneId, boolean>> = { 3: true, 5: true, 7: true, 8: 
 
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 
-/** DOM overlay over the 3D scene. Pointer events pass through everywhere except the panels. */
 /** The VISION column grows with the viewport so its bottom never reaches the centred card: 440 px at 1440, 300 px below 1220. */
 function useVisionColumnWidth() {
   const [w, setW] = useState(440);
@@ -58,23 +60,30 @@ function useVisionColumnWidth() {
   return w;
 }
 
+/** DOM overlay over the 3D scene. Pointer events pass through everywhere except the panels. */
 export function LabUI() {
   const scene = useSimStore((s) => s.scene);
   const demoActive = useSimStore((s) => s.demo.active);
   const showVision = useSimStore((s) => s.showVision);
+  const panels = useSimStore((s) => s.panels);
   const setScene = useSimStore((s) => s.setScene);
   const visionColumnWidth = useVisionColumnWidth();
+  const columnWidth = scene === 3 ? visionColumnWidth : 300;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const s = useSimStore.getState();
-      if (s.demo.active || s.showVision) return;
+      if (s.demo.active || s.showVision || s.tourStep !== null) return;
       const cur = s.scene;
       if (e.key === "ArrowDown" || e.key === "ArrowRight") s.setScene(Math.min(8, cur + 1) as SceneId);
       else if (e.key === "ArrowUp" || e.key === "ArrowLeft") s.setScene(Math.max(1, cur - 1) as SceneId);
       else if (e.key >= "1" && e.key <= "8") s.setScene(Number(e.key) as SceneId);
-      else return;
+      else if (e.key === "f" || e.key === "F") {
+        // focus view: both panels collapse together and come back together
+        const open = s.panels.card || s.panels.telemetry;
+        s.setPanels({ card: !open, telemetry: !open });
+      } else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
@@ -83,16 +92,21 @@ export function LabUI() {
 
   const Card = CARDS[scene];
   const wide = WIDE[scene] && !demoActive;
+  const cardOpen = panels.card || demoActive;
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="pointer-events-none absolute inset-0 select-none overflow-hidden max-[999px]:flex max-[999px]:flex-col">
+      <div
+        className="pointer-events-none absolute inset-0 select-none overflow-hidden max-[999px]:flex max-[999px]:flex-col"
+        style={{ "--col-w": `${columnWidth}px` } as React.CSSProperties}
+      >
         <TopBar />
 
         {/* left rail: scene index. Below 1000 px it is a horizontal strip directly above the card. */}
         <nav
           data-lab="nav"
-          className="pointer-events-auto absolute left-4 top-1/2 flex -translate-y-1/2 flex-col gap-0.5 bg-ground/60 py-1.5 max-[999px]:static max-[999px]:py-0 max-[999px]:mx-auto max-[999px]:mt-auto max-[999px]:w-[calc(100%-2rem)] max-[999px]:max-w-[620px] max-[999px]:translate-y-0 max-[999px]:flex-row max-[999px]:gap-0 max-[999px]:border max-[999px]:border-b-0 max-[999px]:border-line max-[999px]:bg-panel/92 max-[999px]:px-1"
+          data-tour="nav"
+          className="pointer-events-auto absolute left-4 top-1/2 flex w-[148px] -translate-y-1/2 flex-col gap-0.5 border border-line bg-ground/70 py-1.5 max-[999px]:static max-[999px]:mx-auto max-[999px]:mt-auto max-[999px]:w-[calc(100%-2rem)] max-[999px]:max-w-[620px] max-[999px]:translate-y-0 max-[999px]:flex-row max-[999px]:gap-0 max-[999px]:border-b-0 max-[999px]:bg-panel/92 max-[999px]:px-1 max-[999px]:py-0"
           aria-label="Scenes"
         >
           {SCENES.map((s) => {
@@ -102,10 +116,11 @@ export function LabUI() {
                 key={s.id}
                 type="button"
                 disabled={demoActive}
+                aria-current={on ? "page" : undefined}
                 onClick={() => setScene(s.id)}
                 className={clsx(
-                  "group flex items-center gap-2 border-l-2 py-1 pl-2 pr-3 text-left transition-colors duration-100 max-[999px]:border-b-2 max-[999px]:border-l-0 max-[999px]:px-2 max-[999px]:py-2",
-                  on ? "border-teal" : "border-transparent hover:border-line-strong",
+                  "group relative flex items-center gap-2 border-l-2 py-1 pl-2 pr-3 text-left transition-colors duration-150 max-[999px]:border-b-2 max-[999px]:border-l-0 max-[999px]:px-2 max-[999px]:py-2",
+                  on ? "border-teal bg-teal/[0.06]" : "border-transparent hover:border-line-strong hover:bg-panel-2/50",
                   demoActive && "cursor-default opacity-50",
                 )}
               >
@@ -116,58 +131,97 @@ export function LabUI() {
           })}
         </nav>
 
-        {/* right column: feed + telemetry. Wider in VISION so the feed is the focus. */}
+        {/* right column: feed + telemetry + twin log. Wider in Perception so the feed is the focus. */}
         <motion.div
           data-lab="column"
           className="pointer-events-auto absolute right-4 top-14 flex max-h-[calc(100%-4.5rem)] flex-col gap-2 max-[999px]:w-[220px]! max-[759px]:w-[176px]!"
           initial={false}
-          animate={{ width: scene === 3 ? visionColumnWidth : 300 }}
-          transition={{ duration: 0.25, ease: "easeOut" }}
+          animate={{ width: columnWidth }}
+          transition={{ duration: DUR.base, ease: BEZIER.out }}
         >
           <CameraFeed />
           {scene !== 3 && (
-            <div className="min-h-0 overflow-y-auto max-[999px]:hidden">
+            <div className="flex min-h-0 flex-col gap-2 overflow-y-auto max-[999px]:hidden" data-tour="telemetry">
               <Telemetry />
+              {panels.telemetry && <MissionLog />}
             </div>
           )}
         </motion.div>
 
         {/* bottom centre: context card or demo controller. Between 1000 and 1259 px it sits between the rail and the column; below 1000 px it is the last block of the stack. */}
-        <div data-lab="card" className={clsx("pointer-events-none absolute bottom-6 left-1/2 w-[calc(100%-2rem)] -translate-x-1/2", wide ? "max-w-[780px]" : "max-w-[620px]", " max-[1259px]:left-32 max-[1259px]:right-[332px] max-[1259px]:w-auto max-[1259px]:max-w-none max-[1259px]:translate-x-0 max-[999px]:static max-[999px]:mx-auto max-[999px]:mb-4 max-[999px]:w-[calc(100%-2rem)] max-[999px]:max-w-[620px] max-[999px]:translate-x-0")}>
+        <div
+          data-lab="card"
+          data-tour="card"
+          className={clsx(
+            // centred in the space the rail and the column leave, so a wide card can never run under the feed
+            "pointer-events-none absolute bottom-6 left-[176px] right-[calc(var(--col-w)+32px)] mx-auto",
+            wide ? "max-w-[780px]" : "max-w-[620px]",
+            "max-[1259px]:max-w-none",
+            "max-[999px]:static max-[999px]:mb-4 max-[999px]:w-[calc(100%-2rem)] max-[999px]:max-w-[620px]",
+          )}
+        >
           <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={demoActive ? "demo" : scene}
-              className="panel pointer-events-auto max-h-[calc(100vh-9rem)] overflow-y-auto p-4 max-[999px]:max-h-[55vh] max-[759px]:max-h-[42vh]"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              {demoActive ? (
-                <DemoCard />
-              ) : (
-                <>
-                  <div className="float-right ml-3">
-                    <OriginTag scene={scene} />
-                  </div>
-                  <Card />
-                </>
-              )}
-            </motion.div>
+            {cardOpen ? (
+              <motion.div
+                key={demoActive ? "demo" : scene}
+                className="panel pointer-events-auto relative max-h-[calc(100dvh-9rem)] overflow-y-auto p-4 max-[999px]:max-h-[55dvh] max-[759px]:max-h-[42dvh]"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: DUR.fast + 0.04, ease: BEZIER.out }}
+              >
+                {demoActive ? (
+                  <DemoCard />
+                ) : (
+                  <>
+                    <div className="float-right ml-3 flex items-center gap-1.5 max-[759px]:float-none max-[759px]:mb-2 max-[759px]:ml-0 max-[759px]:justify-between">
+                      <OriginTag scene={scene} />
+                      <button
+                        type="button"
+                        className="btn btn-icon -my-1 -mr-1"
+                        aria-label="Collapse panel"
+                        title="Collapse the panel (F toggles all panels)"
+                        onClick={() => useSimStore.getState().setPanels({ card: false })}
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+                    <Card />
+                  </>
+                )}
+              </motion.div>
+            ) : (
+              <motion.button
+                key="collapsed"
+                type="button"
+                className="panel pointer-events-auto mx-auto flex items-center gap-3 px-3 py-2 hover:border-line-strong"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: DUR.fast, ease: BEZIER.out }}
+                onClick={() => useSimStore.getState().setPanels({ card: true })}
+                aria-label={`Expand the ${SCENES[scene - 1].name} panel`}
+              >
+                <span className="value text-[10px] text-teal">{String(scene).padStart(2, "0")}</span>
+                <span className="label text-text">{SCENES[scene - 1].name}</span>
+                <ChevronUp size={14} className="text-muted" />
+              </motion.button>
+            )}
           </AnimatePresence>
         </div>
 
         <AnimatePresence>{showVision && <VisionMoment key="vision" />}</AnimatePresence>
       </div>
+      <Tour />
       <BackendBridge />
     </MotionConfig>
   );
 }
 
-function StatusChip({ name, value, tone }: { name: string; value: string; tone: "teal" | "amber" | "danger" | "dim" }) {
+function StatusChip({ name, value, tone, title, pulse }: { name: string; value: string; tone: "teal" | "amber" | "danger" | "dim"; title?: string; pulse?: boolean }) {
   return (
-    <span className="flex items-center gap-1.5 border border-line px-2 py-1" data-testid={`chip-${name.toLowerCase()}`}>
-      <Dot tone={tone} />
+    <span className="flex items-center gap-1.5 border border-line bg-ground/40 px-2 py-1" data-testid={`chip-${name.toLowerCase()}`} title={title}>
+      <Dot tone={tone} pulse={pulse} />
       <span className="label text-text">{name}</span>
       <span className="label text-[9px] text-dim">{value}</span>
     </span>
@@ -193,27 +247,44 @@ function EstopButton() {
 
 function TopBar() {
   const demoActive = useSimStore((s) => s.demo.active);
-  const startDemo = useSimStore((s) => s.startDemo);
-  const reset = useSimStore((s) => s.reset);
+  const focus = useSimStore((s) => !s.panels.card && !s.panels.telemetry);
+  const { startDemo, reset, setPanels, setTourStep } = useSimStore(useShallow((s) => ({ startDemo: s.startDemo, reset: s.reset, setPanels: s.setPanels, setTourStep: s.setTourStep })));
   const backend = useMissionStore((s) => s.backend);
   const sys = useMissionStore((s) => s.system);
   const ai = sys?.providers.spark.status === "LIVE";
 
   return (
-    <header data-lab="header" className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center justify-between gap-4 border-b border-line/70 bg-ground/55 px-4 max-[999px]:static max-[999px]:shrink-0 max-[439px]:gap-2 max-[439px]:px-3">
-      <div className="pointer-events-auto flex min-w-0 items-baseline gap-3 overflow-hidden">
+    <header data-lab="header" className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center justify-between gap-4 border-b border-line bg-ground/70 px-4 backdrop-blur-[2px] max-[999px]:static max-[999px]:shrink-0 max-[439px]:gap-2 max-[439px]:px-3">
+      <div className="pointer-events-auto flex min-w-0 items-center gap-4 overflow-hidden">
         <span className="whitespace-nowrap font-mono text-[13px] font-semibold tracking-[0.28em] text-text max-[439px]:tracking-[0.12em]">AQUASENTINAL</span>
-        <span className="label whitespace-nowrap max-[1399px]:hidden">AI underwater inspection</span>
-        <span className="hidden truncate whitespace-nowrap text-[12px] text-muted min-[1500px]:block">Meta models on a camera gantry.</span>
+        <span className="h-4 w-px bg-line-strong max-[1279px]:hidden" />
+        <span className="label whitespace-nowrap text-teal max-[1279px]:hidden">Mission control</span>
+        <Link href="/walkthrough" className="label whitespace-nowrap transition-colors hover:text-text max-[1099px]:hidden">
+          Walkthrough
+        </Link>
+        <button type="button" onClick={() => setTourStep(0)} disabled={demoActive} className="label inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-text disabled:opacity-50 max-[759px]:hidden" data-testid="start-tour">
+          <Compass size={12} /> Guide
+        </button>
       </div>
       <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
-        {/* secondary status, dropped below 1000 px so the brand always has room */}
+        {/* secondary status, dropped below 1000 px so the brand always has room. Unknown is grey, never green. */}
         <div className="contents max-[999px]:hidden">
-          <StatusChip name="Mode" value={sys?.mode ?? "SIMULATION"} tone={sys?.hardwareActive ? "amber" : "teal"} />
-          <StatusChip name="Backend" value={backend} tone={backend === "ONLINE" ? "teal" : backend === "OFFLINE" ? "danger" : "dim"} />
-          <StatusChip name="AI" value={!sys ? "UNKNOWN" : ai ? "META LIVE" : "OFFLINE"} tone={ai ? "teal" : "amber"} />
+          <StatusChip name="Mode" value={sys?.mode ?? "UNKNOWN"} tone={!sys ? "dim" : sys.hardwareActive ? "amber" : "teal"} title={sys ? `Backend reports ${sys.mode}` : "Backend status not read yet"} />
+          <StatusChip name="Backend" value={backend} tone={backend === "ONLINE" ? "teal" : backend === "OFFLINE" ? "danger" : "dim"} pulse={backend === "ONLINE"} title="Polled every 5 s and on every event socket reconnect" />
+          <StatusChip name="AI" value={!sys ? "UNKNOWN" : ai ? "META LIVE" : "OFFLINE"} tone={!sys ? "dim" : ai ? "teal" : "amber"} title={!sys ? "Provider status unknown until the backend answers" : ai ? "Muse Spark reachable with a key" : "No MODEL_API_KEY: labelled offline fallbacks"} />
           <span className="mx-1 h-5 w-px bg-line" />
         </div>
+        <button
+          type="button"
+          className="btn btn-icon max-[999px]:hidden"
+          onClick={() => setPanels({ card: focus, telemetry: focus })}
+          aria-pressed={focus}
+          aria-label={focus ? "Show panels" : "Focus the 3D view"}
+          title={focus ? "Show panels (F)" : "Focus the 3D view (F)"}
+          data-testid="focus-toggle"
+        >
+          {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
         <Btn primary onClick={startDemo} disabled={demoActive} label={demoActive ? "Demo running" : "Run demo"}>
           <Play size={14} /> <span className="max-[439px]:hidden">{demoActive ? "Demo running" : "Run demo"}</span>
           <span className="min-[440px]:hidden">Demo</span>

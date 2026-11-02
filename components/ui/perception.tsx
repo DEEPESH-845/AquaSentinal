@@ -2,12 +2,15 @@
 
 import clsx from "clsx";
 import { Camera } from "lucide-react";
-import { useState } from "react";
-import type { Segmentation } from "@/lib/api/types";
+import { useRef, useState } from "react";
+import { gsap, useGsap } from "@/lib/animations/gsap";
+import { DUR, EASE, prefersReducedMotion } from "@/lib/animations/motion";
+import type { Observation, SegInstance, Segmentation } from "@/lib/api/types";
 import { CAMERA } from "@/lib/sim/constants";
 import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore, type CaptureView } from "@/lib/store/mission";
-import { Btn, CardHead, Chip, SourceTag, f1, f2, human, isTargetClass, pct, providerSource } from "./shared";
+import { Btn, CardHead, Chip, Segmented, SourceTag, f1, f2, human, isTargetClass, pct, providerSource } from "./shared";
+import { C } from "@/lib/theme";
 
 const W = CAMERA.captureWidth;
 const H = CAMERA.captureHeight;
@@ -32,47 +35,115 @@ function stages(c: CaptureView | undefined): Array<[string, StageState, string]>
 
 const STAGE_TONE: Record<StageState, string> = { done: "border-teal text-teal", fail: "border-danger text-danger", skip: "border-line text-dim", wait: "border-amber text-amber animate-pulse motion-reduce:animate-none" };
 
-/** Frame plus overlays drawn in frame pixel space, so they scale with the image. */
-function FrameView({ c, showMasks, showSim }: { c: CaptureView; showMasks: boolean; showSim: boolean }) {
+export type FrameMode = "RAW" | "MASKS" | "TRACKED" | "ANNOTATED";
+
+const MODES: Array<{ id: FrameMode; text: string; title: string }> = [
+  { id: "RAW", text: "Raw", title: "The frame exactly as captured and sent to the backend" },
+  { id: "MASKS", text: "Masks", title: "Segmentation masks as returned (SAM 3.1, or twin-geometry outlines offline)" },
+  { id: "TRACKED", text: "Tracked", title: "Mask boxes with the persistent asset id the backend associated them with" },
+  { id: "ANNOTATED", text: "Annotated", title: "Masks, track ids and labels together" },
+];
+
+/** The observation the backend derived from this instance: same label, same world position (it copies the instance's centroid). */
+function trackOf(inst: SegInstance, obs: Observation[]): Observation | undefined {
+  const label = inst.targetClass ?? "debris";
+  return obs.find((o) => o.label === label && Math.abs(o.x - inst.worldX) < 0.05 && Math.abs(o.y - inst.worldY) < 0.05);
+}
+
+/** Overlay layers in frame pixel space, so they scale with the image and stay on the model's coordinates. */
+function OverlayLayers({ c, mode, showSim }: { c: CaptureView; mode: FrameMode; showSim: boolean }) {
   const segs = c.result?.segmentations ?? [];
+  const obs = c.result?.observations ?? [];
+  const masks = mode === "MASKS" || mode === "ANNOTATED";
+  const tracks = mode === "TRACKED" || mode === "ANNOTATED";
   return (
-    <div className="relative w-full border border-line" style={{ aspectRatio: `${W} / ${H}` }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={c.frameUrl} alt={`Inspection frame ${c.seq}`} className="absolute inset-0 h-full w-full" />
-      <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 h-full w-full" aria-hidden>
-        {showMasks &&
-          segs.flatMap((s) =>
-            s.instances.map((inst) => {
-              const amber = isTargetClass(inst.targetClass ?? "");
-              const color = amber ? "#f2a93b" : "#3db9b0";
-              const [x0, y0] = inst.box;
-              return (
-                <g key={inst.instanceId}>
-                  {inst.polygons.map((poly, i) => (
-                    <polygon key={i} points={poly.map(([x, y]) => `${x},${y}`).join(" ")} fill={color} fillOpacity={s.provider === "SAM_3_1" ? 0.32 : 0.18} stroke={color} strokeWidth={2} strokeDasharray={s.provider === "SAM_3_1" ? undefined : "6 4"} />
+    <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 h-full w-full" aria-hidden>
+      <g className="ov-layer">
+        {segs.flatMap((s) =>
+          s.instances.map((inst) => {
+            const amber = isTargetClass(inst.targetClass ?? "");
+            const color = amber ? C.amber : C.teal;
+            const [x0, y0, x1, y1] = inst.box;
+            const t = tracks ? trackOf(inst, obs) : undefined;
+            const sam = s.provider === "SAM_3_1";
+            return (
+              <g key={inst.instanceId}>
+                {masks &&
+                  inst.polygons.map((poly, i) => (
+                    <polygon key={i} points={poly.map(([x, y]) => `${x},${y}`).join(" ")} fill={color} fillOpacity={sam ? 0.32 : 0.18} stroke={color} strokeWidth={2} strokeDasharray={sam ? undefined : "6 4"} />
                   ))}
-                  <text x={x0 + 2} y={Math.max(14, y0 - 6)} fill={color} fontSize={15} fontFamily="var(--font-plex-mono)" paintOrder="stroke" stroke="#0b1219" strokeWidth={3}>
-                    {inst.prompt}
+                {tracks && <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray={t ? undefined : "4 4"} />}
+                {(masks || tracks) && (
+                  <text x={x0 + 2} y={Math.max(14, y0 - 6)} fill={color} fontSize={15} fontFamily="var(--font-plex-mono)" paintOrder="stroke" stroke={C.ground} strokeWidth={3}>
+                    {tracks ? `${t ? `ID ${t.assetId.slice(-6)}` : "UNTRACKED"} ` : ""}
+                    {mode !== "TRACKED" ? inst.prompt : human(inst.targetClass ?? "debris")}
                     {inst.confidence !== null ? ` ${(inst.confidence * 100).toFixed(0)}%` : ""}
                   </text>
-                </g>
-              );
-            }),
-          )}
+                )}
+              </g>
+            );
+          }),
+        )}
         {showSim &&
           c.request.detections.map((d) => {
             const [u, v, w, h] = d.bbox;
             return (
               <g key={d.objectId}>
-                <rect x={u * W} y={v * H} width={w * W} height={h * H} fill="none" stroke="#e6edf3" strokeOpacity={0.75} strokeWidth={1.5} strokeDasharray="3 3" />
-                <text x={u * W + 2} y={(v + h) * H + 14} fill="#e6edf3" fontSize={12} fontFamily="var(--font-plex-mono)" paintOrder="stroke" stroke="#0b1219" strokeWidth={3}>
+                <rect x={u * W} y={v * H} width={w * W} height={h * H} fill="none" stroke={C.text} strokeOpacity={0.75} strokeWidth={1.5} strokeDasharray="3 3" />
+                <text x={u * W + 2} y={(v + h) * H + 14} fill={C.text} fontSize={12} fontFamily="var(--font-plex-mono)" paintOrder="stroke" stroke={C.ground} strokeWidth={3}>
                   SIM {d.class} {(d.confidence * 100).toFixed(0)}%
                 </text>
               </g>
             );
           })}
-      </svg>
-      <div className="value absolute left-1.5 top-1.5 bg-ground/75 px-1 text-[10px] text-muted">
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * Frame plus overlays. With compare on, the raw frame stays whole and the overlay is revealed right of the divider,
+ * so the operator can check a mask edge against the pixels under it. The divider is a native range input.
+ */
+function FrameView({ c, mode, showSim, compare }: { c: CaptureView; mode: FrameMode; showSim: boolean; compare: boolean }) {
+  const [split, setSplit] = useState(50);
+  const root = useRef<HTMLDivElement>(null);
+  // new detections and a new view fade in; positions never animate, so coordinates stay exact
+  useGsap(
+    () => {
+      if (prefersReducedMotion()) return;
+      const g = root.current?.querySelector(".ov-layer");
+      if (g) gsap.fromTo(g, { opacity: 0 }, { opacity: 1, duration: DUR.base, ease: EASE.out });
+    },
+    [c.seq, c.status, mode, showSim],
+    root,
+  );
+  return (
+    <div ref={root} className="relative w-full overflow-hidden border border-line" style={{ aspectRatio: `${W} / ${H}` }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={c.frameUrl} alt={`Inspection frame ${c.seq}`} className="absolute inset-0 h-full w-full" />
+      <div className="absolute inset-0" style={compare ? { clipPath: `inset(0 0 0 ${split}%)` } : undefined}>
+        <OverlayLayers c={c} mode={mode} showSim={showSim} />
+      </div>
+      {compare && (
+        <>
+          <div className="pointer-events-none absolute inset-y-0 w-px bg-teal" style={{ left: `${split}%` }} aria-hidden>
+            <span className="absolute left-1/2 top-1/2 h-6 w-3 -translate-x-1/2 -translate-y-1/2 border border-teal bg-ground/80" />
+          </div>
+          <span className="label pointer-events-none absolute bottom-1.5 left-1.5 bg-ground/75 px-1 text-[9px]">raw</span>
+          <span className="label pointer-events-none absolute bottom-1.5 right-1.5 bg-ground/75 px-1 text-[9px] text-teal">{mode.toLowerCase()}</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={split}
+            onChange={(e) => setSplit(Number(e.target.value))}
+            aria-label="Comparison divider position"
+            className="absolute inset-0 h-full cursor-ew-resize opacity-0"
+          />
+        </>
+      )}
+      <div className="value pointer-events-none absolute left-1.5 top-1.5 bg-ground/75 px-1 text-[10px] text-muted">
         #{c.seq} {c.request.reason} X {f1(c.request.gantryX)} Y {f1(c.request.gantryY)}
       </div>
     </div>
@@ -104,7 +175,8 @@ export function PerceptionCard() {
   const backend = useMissionStore((s) => s.backend);
   const samLive = useMissionStore((s) => s.system?.providers.sam.status === "LIVE");
   const estop = useSimStore((s) => s.telemetry.estop);
-  const [showMasks, setShowMasks] = useState(true);
+  const [mode, setMode] = useState<FrameMode>("ANNOTATED");
+  const [compare, setCompare] = useState(false);
   const [showSim, setShowSim] = useState(false);
   const c = captures.find((x) => x.seq === selected) ?? captures[captures.length - 1];
   const r = c?.result;
@@ -139,10 +211,11 @@ export function PerceptionCard() {
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 max-[759px]:grid-cols-1">
             <div>
-              <FrameView c={c} showMasks={showMasks} showSim={showSim} />
-              <div className="mt-1 flex flex-wrap items-center gap-1">
-                <Chip tone="teal" active={showMasks} onClick={() => setShowMasks((v) => !v)}>
-                  {segProvider === "SAM_3_1" ? "SAM masks" : "Fixture masks"}
+              <FrameView c={c} mode={mode} showSim={showSim} compare={compare && mode !== "RAW"} />
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                <Segmented label="Frame view" options={MODES} value={mode} onChange={setMode} />
+                <Chip tone="teal" active={compare} onClick={() => setCompare((v) => !v)} disabled={mode === "RAW"} title="Split the frame: raw on the left, the chosen view on the right">
+                  Compare
                 </Chip>
                 <Chip tone="neutral" active={showSim} onClick={() => setShowSim((v) => !v)}>
                   Sim detector boxes

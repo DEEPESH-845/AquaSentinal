@@ -18,8 +18,10 @@ export class ApiError extends Error {
 async function request<T>(path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), init.timeoutMs ?? 20_000);
+  // a caller's signal (operator cancel) aborts the same request; the timeout still applies
+  init.signal?.addEventListener("abort", () => ctrl.abort(), { once: true });
   try {
-    const res = await fetch(BACKEND_URL + path, { ...init, signal: init.signal ?? ctrl.signal });
+    const res = await fetch(BACKEND_URL + path, { ...init, signal: ctrl.signal });
     const text = await res.text();
     const body = text ? safeJson(text) : null;
     if (!res.ok) {
@@ -30,7 +32,7 @@ async function request<T>(path: string, init: RequestInit & { timeoutMs?: number
     return body as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    if ((e as Error).name === "AbortError") throw new ApiError("backend request timed out", 0);
+    if ((e as Error).name === "AbortError") throw new ApiError(init.signal?.aborted ? "cancelled by the operator" : "backend request timed out", 0);
     throw new ApiError("backend unreachable", 0);
   } finally {
     clearTimeout(timer);
@@ -45,8 +47,8 @@ const safeJson = (t: string): unknown => {
   }
 };
 
-const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
-  request<T>(path, { method: "POST", headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), timeoutMs });
+const post = <T>(path: string, body?: unknown, timeoutMs?: number, signal?: AbortSignal) =>
+  request<T>(path, { method: "POST", headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), timeoutMs, signal });
 
 export interface TwinContext {
   gantryX: number;
@@ -62,7 +64,8 @@ export interface TwinContext {
 export const api = {
   health: () => request<{ status: string; version: string }>("/api/health", { timeoutMs: 3000 }),
   status: () => request<SystemStatus>("/api/system/status", { timeoutMs: 4000 }),
-  interpret: (instruction: string, context: TwinContext, offline = false) => post<InterpretResponse>(`/api/ai/interpret${offline ? "?offline=true" : ""}`, { instruction, context }, 90_000),
+  interpret: (instruction: string, context: TwinContext, offline = false, signal?: AbortSignal) =>
+    post<InterpretResponse>(`/api/ai/interpret${offline ? "?offline=true" : ""}`, { instruction, context }, 90_000, signal),
   start: (id: string) => post<MissionRecord>(`/api/missions/${encodeURIComponent(id)}/start`, { executor: "TWIN" }),
   pause: (id: string) => post<MissionRecord>(`/api/missions/${encodeURIComponent(id)}/pause`),
   resume: (id: string) => post<MissionRecord>(`/api/missions/${encodeURIComponent(id)}/resume`),

@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import { Check, Mic, Pause, Play, Square, Wand2, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { MissionRecord, ToolCallRecord } from "@/lib/api/types";
 import { DEMO_INSTRUCTION } from "@/lib/sim/demo";
@@ -16,6 +17,7 @@ function VoiceButton() {
   const { startVoice, stopVoice } = useMissionStore(useShallow((s) => ({ startVoice: s.startVoice, stopVoice: s.stopVoice })));
   const recording = voice.state === "RECORDING";
   const busy = voice.state === "TRANSCRIBING";
+  const elapsed = useElapsed(recording);
   return (
     <button
       type="button"
@@ -40,8 +42,98 @@ function VoiceButton() {
       className={clsx("btn inline-flex shrink-0 items-center gap-1.5 select-none", recording && "border-danger! text-danger!", busy && "opacity-60")}
     >
       <Mic size={14} className={clsx(recording && "animate-pulse motion-reduce:animate-none")} />
-      {recording ? "Listening" : busy ? "Transcribing" : "Hold to talk"}
+      {recording ? `Listening ${elapsed.toFixed(1)} s` : busy ? "Transcribing" : "Hold to talk"}
     </button>
+  );
+}
+
+/** Seconds since `on` became true, at 10 Hz; 0 while off. */
+function useElapsed(on: boolean) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const t0 = performance.now();
+    const id = window.setInterval(() => setT((performance.now() - t0) / 1000), 100);
+    return () => {
+      window.clearInterval(id);
+      setT(0);
+    };
+  }, [on]);
+  return t;
+}
+
+type StageState = "done" | "active" | "failed" | "skipped" | "pending";
+const STAGE_CLS: Record<StageState, string> = {
+  done: "border-teal/70 text-teal",
+  active: "border-amber text-amber bg-amber/10",
+  failed: "border-danger text-danger bg-danger/10",
+  skipped: "border-line text-dim line-through decoration-dim/60",
+  pending: "border-line text-dim",
+};
+
+/**
+ * The operator's view of where the instruction is: input, transcription, interpretation, plan, approval, execution, result.
+ * Every state is read from the stores (voice, the pending request, the backend mission record, the twin); nothing advances on a timer.
+ */
+function MissionStateStrip() {
+  const { instruction, voice, transcript, interpreting, interpretError, mission } = useMissionStore(
+    useShallow((s) => ({ instruction: s.instruction, voice: s.voice, transcript: s.transcript, interpreting: s.interpreting, interpretError: s.interpretError, mission: s.mission })),
+  );
+  const backend = useMissionStore((s) => s.backend);
+  const running = useSimStore((s) => s.mode === "MISSION");
+  const st = mission?.status;
+  const finished = st === "COMPLETED";
+  const stopped = st === "ABORTED" || st === "FAILED";
+  const executing = running || st === "RUNNING" || st === "PAUSED";
+  const typed = !!mission && !transcript;
+
+  const state =
+    voice.state === "ERROR" || interpretError || stopped
+      ? "FAILED"
+      : voice.state === "RECORDING"
+        ? "LISTENING"
+        : voice.state === "TRANSCRIBING"
+          ? "TRANSCRIBING"
+          : interpreting
+            ? "INTERPRETING"
+            : executing
+              ? "EXECUTING"
+              : finished
+                ? "COMPLETED"
+                : st === "PLANNED"
+                  ? "AWAITING_APPROVAL"
+                  : backend === "ONLINE" && instruction.trim().length >= 3
+                    ? "READY"
+                    : "IDLE";
+
+  const stages: Array<[string, StageState]> = [
+    ["Input", voice.state === "RECORDING" ? "active" : instruction.trim().length >= 3 || mission ? "done" : "pending"],
+    ["Transcribe", voice.state === "TRANSCRIBING" ? "active" : voice.state === "ERROR" ? "failed" : transcript ? "done" : typed ? "skipped" : "pending"],
+    ["Interpret", interpreting ? "active" : interpretError ? "failed" : mission ? "done" : "pending"],
+    ["Plan", mission ? "done" : "pending"],
+    ["Approve", st === "PLANNED" ? "active" : mission ? "done" : "pending"],
+    ["Execute", executing ? "active" : finished ? "done" : stopped ? "failed" : "pending"],
+    ["Result", finished ? "done" : "pending"],
+  ];
+  return (
+    <div className="mb-3" data-testid="mission-state" data-state={state}>
+      <div className="mb-1 flex items-center justify-between">
+        <span className="label text-[9px] text-dim">Mission state</span>
+        <span className={clsx("value text-[10px]", state === "FAILED" ? "text-danger" : state === "COMPLETED" ? "text-teal" : state === "IDLE" ? "text-dim" : "text-amber")}>{state.replace(/_/g, " ")}</span>
+      </div>
+      <ol className="grid grid-cols-7 gap-1 max-[459px]:grid-cols-4">
+        {stages.map(([name, ss]) => (
+          <li
+            key={name}
+            className={clsx("truncate border px-1 py-[3px] text-center font-mono text-[9px] tracking-[0.08em] uppercase transition-colors duration-300", STAGE_CLS[ss], ss === "active" && "animate-pulse motion-reduce:animate-none")}
+            aria-current={ss === "active" ? "step" : undefined}
+            title={`${name}: ${ss}`}
+          >
+            {name}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -55,8 +147,9 @@ function Composer() {
   const running = useSimStore((s) => s.mode === "MISSION");
   // a plan under review or a mission in progress owns the box; a finished one must not block the next instruction
   const locked = interpreting || running || (mission !== null && !["COMPLETED", "ABORTED", "FAILED"].includes(mission.status));
+  const cancel = useMissionStore((s) => s.cancelInterpret);
   return (
-    <div>
+    <div data-tour="composer">
       <label htmlFor="instruction" className="label mb-1 flex items-center justify-between">
         <span>Instruction</span>
         <span className="flex items-center gap-1.5">
@@ -91,8 +184,13 @@ function Composer() {
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <VoiceButton />
         <Btn primary onClick={() => void interpret()} disabled={locked || backend === "OFFLINE" || instruction.trim().length < 3}>
-          <Wand2 size={14} /> {interpreting ? "Planning" : "Plan mission"}
+          <Wand2 size={14} className={clsx(interpreting && "animate-pulse motion-reduce:animate-none")} /> {interpreting ? (sparkLive ? "Muse Spark planning" : "Planning offline") : "Plan mission"}
         </Btn>
+        {interpreting && (
+          <Btn onClick={cancel} label="Cancel planning">
+            <X size={14} /> Cancel
+          </Btn>
+        )}
         {!instruction && !locked && (
           <button type="button" className="value text-[10px] text-dim hover:text-text" onClick={() => setInstruction(DEMO_INSTRUCTION)}>
             Use the example instruction
@@ -256,6 +354,7 @@ export function MissionCard() {
         title="AI mission control"
         note="Describe the inspection by voice or text. Muse Spark turns it into a structured mission through allowlisted tools; the backend validates it and compiles bounded waypoints for you to approve."
       />
+      <MissionStateStrip />
       <Composer />
       {mission && <PlanReview m={mission} />}
       <MissionLive />

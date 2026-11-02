@@ -171,6 +171,13 @@ export function VisionMoment() {
     s.applyPreset("E");
     s.setScene(6);
   };
+  const dialog = useRef<HTMLDivElement>(null);
+  // modal: focus moves in on open and back to where it was on close
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    dialog.current?.querySelector<HTMLElement>("button")?.focus();
+    return () => prev?.focus?.();
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
@@ -181,6 +188,10 @@ export function VisionMoment() {
 
   return (
     <motion.div
+      ref={dialog}
+      role="dialog"
+      aria-modal="true"
+      aria-label="From simulation to field"
       className="pointer-events-auto absolute inset-0 z-50 flex flex-col items-center justify-center overflow-y-auto bg-ground/[0.985] px-6 max-[759px]:justify-start max-[759px]:pt-14 max-[759px]:pb-8"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}

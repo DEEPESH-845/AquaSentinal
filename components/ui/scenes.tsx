@@ -1,8 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import { BarChart3, Home, Square } from "lucide-react";
-import { useState, type MouseEvent } from "react";
+import { BarChart3, Compass, Home, Square } from "lucide-react";
+import Link from "next/link";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { compareStrategies } from "@/lib/sim/compare";
 import { GANTRY } from "@/lib/sim/constants";
@@ -12,6 +13,7 @@ import { useSimStore, type ComponentId } from "@/lib/sim/store";
 import type { MissionResult } from "@/lib/sim/types";
 import { useMissionStore } from "@/lib/store/mission";
 import { Btn, CardHead, Chip, Dot, ObjectChips, SourceTag, clampNum, f1, f2, pad2, pct, useObjects, isTargetClass } from "./shared";
+import { C } from "@/lib/theme";
 
 // ---------------------------------------------------------------- 01 MISSION OVERVIEW
 
@@ -39,11 +41,16 @@ export function OverviewCard() {
           {pct(env.visibility, 0)} <span className="text-dim">sim</span>
         </span>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Btn primary onClick={() => setScene(5)}>
           Plan an inspection
         </Btn>
-        <Btn onClick={() => setScene(2)}>Explore the system</Btn>
+        <Btn onClick={() => useSimStore.getState().setTourStep(0)} label="Take the guided tour">
+          <Compass size={14} /> Guided tour
+        </Btn>
+        <Link href="/walkthrough" className="label ml-1 underline-offset-4 transition-colors hover:text-text hover:underline">
+          How it works -&gt;
+        </Link>
       </div>
     </div>
   );
@@ -60,19 +67,27 @@ const COMPONENTS: { id: ComponentId; name: string; text: string }[] = [
   { id: "test-objects", name: "Inspection targets", text: "Loose cable, rope offcut, dropped wrench, crate, concrete panel, rocks." },
 ];
 
-function Service({ name, status, detail }: { name: string; status: "LIVE" | "OFFLINE" | "ON" | "OFF"; detail: string }) {
+type ServiceStatus = "LIVE" | "OFFLINE" | "ON" | "OFF" | "UNKNOWN";
+
+/** One dependency. UNKNOWN (not checked, or the backend that would check it is unreachable) is grey, never green. */
+function Service({ name, status, detail }: { name: string; status: ServiceStatus; detail: string }) {
   const on = status === "LIVE" || status === "ON";
+  const unknown = status === "UNKNOWN";
   return (
-    <div className="grid grid-cols-[10px_1fr_auto] items-center gap-x-2 border-b border-line py-[3px]">
-      <Dot tone={on ? "teal" : "amber"} />
+    <div className="grid grid-cols-[10px_1fr_auto] items-center gap-x-2 border-b border-line py-[3px]" data-status={status}>
+      <Dot tone={unknown ? "dim" : on ? "teal" : "amber"} />
       <span className="min-w-0">
         <span className="label text-text">{name}</span>
-        <span className="block truncate text-[10px] text-muted">{detail}</span>
+        <span className="block truncate text-[10px] text-muted" title={detail}>
+          {detail}
+        </span>
       </span>
-      <span className={clsx("label text-[9px]", on ? "text-teal" : "text-amber")}>{status}</span>
+      <span className={clsx("label text-[9px]", unknown ? "text-dim" : on ? "text-teal" : "text-amber")}>{status}</span>
     </div>
   );
 }
+
+const ago = (ms: number | null) => (ms === null ? "never" : `${Math.max(0, Math.round((Date.now() - ms) / 1000))} s ago`);
 
 export function SystemCard() {
   const setHighlight = useSimStore((s) => s.setHighlight);
@@ -80,41 +95,62 @@ export function SystemCard() {
   const [sticky, setSticky] = useState<ComponentId | null>(null);
   const sys = useMissionStore((s) => s.system);
   const backend = useMissionStore((s) => s.backend);
+  const lastOk = useMissionStore((s) => s.lastStatusOkAt);
+  const preflight = useMissionStore((s) => s.preflight);
+  const mission = useMissionStore((s) => s.mission);
   const p = sys?.providers;
+  const known = !!sys;
+  const metaLive = preflight?.checks.find((c) => c.id === "meta_live");
+  const hw = sys?.gantry.status;
   return (
     <div>
-      <CardHead title="System architecture" note="Hover a component to highlight it in the scene; click to keep it highlighted." />
+      <CardHead title="System health and architecture" note="Live dependency status from the backend, then the physical components: hover or focus one to highlight it in the scene, select it to keep it highlighted." />
+      <div className="mb-3 grid grid-cols-2 gap-x-4 max-[759px]:grid-cols-1" data-testid="system-health">
+        <Service name="Backend" status={backend === "ONLINE" ? "ON" : backend === "OFFLINE" ? "OFF" : "UNKNOWN"} detail={backend === "ONLINE" ? `FastAPI ${sys?.version ?? ""}, last answer ${ago(lastOk)}` : backend === "OFFLINE" ? `not reachable; last answer ${ago(lastOk)}` : "connecting"} />
+        <Service
+          name="Meta API connectivity"
+          status={!metaLive ? "UNKNOWN" : metaLive.ok ? "LIVE" : "OFFLINE"}
+          detail={metaLive ? metaLive.detail : "not checked: backend preflight has not answered"}
+        />
+        <Service name="Muse Spark 1.3" status={known ? p!.spark.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : p!.spark.status === "LIVE" ? "mission planning, frame reasoning, summaries" : "offline: labelled keyword parser"} />
+        <Service name="SAM 3.1" status={known ? p!.sam.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : p!.sam.status === "LIVE" ? "text-prompted masks" : "offline: twin-geometry outlines"} />
+        <Service name="Voice Transcribe" status={known ? p!.voice.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : p!.voice.status === "LIVE" ? "push-to-talk speech to text" : "offline: type instead"} />
+        <Service name="Camera" status={!known ? "UNKNOWN" : sys!.camera.online ? "ON" : "OFF"} detail={known ? `${sys!.camera.source.replace(/_/g, " ").toLowerCase()}${sys!.camera.resolution ? ` ${sys!.camera.resolution}` : ""}` : "unknown"} />
+        <Service
+          name="Gantry driver"
+          status={!known ? "UNKNOWN" : sys!.hardwareActive ? (hw?.connected ? "ON" : "OFF") : "OFF"}
+          detail={!known ? "unknown" : sys!.hardwareActive ? `serial GRBL ${hw?.connected ? "connected" : "not connected"}${hw?.homed ? ", homed" : ", not homed"} (unverified rig)` : "simulated twin; hardware disabled by default"}
+        />
+        <Service name="Active mission" status={!mission ? "OFF" : ["RUNNING", "PAUSED"].includes(mission.status) ? "ON" : "OFF"} detail={mission ? `${mission.id} ${mission.status.toLowerCase()}` : "none"} />
+      </div>
       <ul className="grid grid-cols-2 gap-x-4 border-t border-line max-[759px]:grid-cols-1">
         {COMPONENTS.map((c, i) => {
           const on = highlight === c.id;
           return (
-            <li
-              key={c.id}
-              className={clsx("grid cursor-pointer grid-cols-[22px_1fr] gap-x-1.5 border-b border-line py-1 pr-1 pl-1 transition-colors duration-100", on ? "bg-panel-2" : "hover:bg-panel-2/60")}
-              onMouseEnter={() => setHighlight(c.id)}
-              onMouseLeave={() => setHighlight(sticky)}
-              onClick={() => {
-                const next = sticky === c.id ? null : c.id;
-                setSticky(next);
-                setHighlight(next);
-              }}
-            >
-              <span className={clsx("value text-[11px]", on ? "text-teal" : "text-dim")}>{pad2(i + 1)}</span>
-              <span className={clsx("label", on ? "text-teal" : "text-text")}>{c.name}</span>
-              <span />
-              <span className="text-[11px] leading-snug text-muted">{c.text}</span>
+            <li key={c.id}>
+              <button
+                type="button"
+                aria-pressed={sticky === c.id}
+                className={clsx("grid w-full grid-cols-[22px_1fr] gap-x-1.5 border-b border-line py-1 pr-1 pl-1 text-left transition-colors duration-150", on ? "bg-panel-2" : "hover:bg-panel-2/60")}
+                onMouseEnter={() => setHighlight(c.id)}
+                onMouseLeave={() => setHighlight(sticky)}
+                onFocus={() => setHighlight(c.id)}
+                onBlur={() => setHighlight(sticky)}
+                onClick={() => {
+                  const next = sticky === c.id ? null : c.id;
+                  setSticky(next);
+                  setHighlight(next);
+                }}
+              >
+                <span className={clsx("value text-[11px]", on ? "text-teal" : "text-dim")}>{pad2(i + 1)}</span>
+                <span className={clsx("label", on ? "text-teal" : "text-text")}>{c.name}</span>
+                <span />
+                <span className="text-[11px] leading-snug text-muted">{c.text}</span>
+              </button>
             </li>
           );
         })}
       </ul>
-      <div className="mt-2 grid grid-cols-2 gap-x-4 max-[759px]:grid-cols-1">
-        <Service name="Backend" status={backend === "ONLINE" ? "ON" : "OFF"} detail={backend === "ONLINE" ? `FastAPI ${sys?.version ?? ""}, ${sys?.mode ?? ""}` : "not reachable"} />
-        <Service name="Muse Spark 1.3" status={p?.spark.status ?? "OFFLINE"} detail={p?.spark.status === "LIVE" ? "mission planning, frame reasoning, summaries" : "offline: labelled keyword parser"} />
-        <Service name="SAM 3.1" status={p?.sam.status ?? "OFFLINE"} detail={p?.sam.status === "LIVE" ? "text-prompted masks" : "offline: simulated detector"} />
-        <Service name="Voice Transcribe" status={p?.voice.status ?? "OFFLINE"} detail={p?.voice.status === "LIVE" ? "push-to-talk speech to text" : "offline: type instead"} />
-        <Service name="Gantry driver" status={sys?.hardwareActive ? "ON" : "OFF"} detail={sys?.hardwareActive ? "SERIAL GRBL (unverified)" : "simulated; hardware disabled by default"} />
-        <Service name="Camera" status={sys?.camera.online ? "ON" : "OFF"} detail={sys ? `${sys.camera.source.replace(/_/g, " ").toLowerCase()}${sys.camera.resolution ? ` ${sys.camera.resolution}` : ""}` : "unknown"} />
-      </div>
     </div>
   );
 }
@@ -143,9 +179,25 @@ function XYPad() {
     moveGantryTo(Math.round(x * 10) / 10, Math.round(y * 10) / 10);
   };
 
+  // Arrow keys jog 5 cm (Shift: 1 cm) from the current target, so held keys queue a path rather than fighting the motion.
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 1 : 5;
+    const d: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    const v = d[e.key];
+    if (!v) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (estop) return;
+    moveGantryTo(clampNum(g.x.target + v[0], 0, GANTRY.travelX), clampNum(g.y.target + v[1], 0, GANTRY.travelY));
+  };
+
   return (
     <div
-      className={clsx("relative shrink-0 border border-line-strong bg-panel-2/60", estop ? "cursor-not-allowed" : "cursor-crosshair")}
+      role="application"
+      tabIndex={0}
+      aria-label={`Gantry plan view. Carriage at ${f1(pos.x)}, ${f1(pos.y)} cm. Click a point or use the arrow keys to move; Shift for 1 cm steps.`}
+      onKeyDown={onKey}
+      className={clsx("relative shrink-0 border border-line-strong bg-panel-2/60 transition-colors focus-visible:border-teal", estop ? "cursor-not-allowed" : "cursor-crosshair")}
       style={{
         width: PAD_W,
         height: PAD_H,
@@ -159,7 +211,7 @@ function XYPad() {
     >
       {plan && (
         <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-          <polyline points={plan.waypoints.map((w) => `${px(w.x)},${py(w.y)}`).join(" ")} fill="none" stroke="#f2a93b" strokeOpacity={0.6} strokeWidth={0.8} vectorEffect="non-scaling-stroke" />
+          <polyline points={plan.waypoints.map((w) => `${px(w.x)},${py(w.y)}`).join(" ")} fill="none" stroke={C.amber} strokeOpacity={0.6} strokeWidth={0.8} vectorEffect="non-scaling-stroke" />
         </svg>
       )}
       {plan?.waypoints.map((w, i) => (
