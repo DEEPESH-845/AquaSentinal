@@ -1,10 +1,12 @@
 "use client";
 
+import { PerformanceMonitor } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { TANK } from "@/lib/sim/constants";
+import { mulberry32 } from "@/lib/sim/rng";
 import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
 import { Aquarium } from "./Aquarium";
@@ -16,6 +18,7 @@ import { Callouts, Overlays, PlanPath } from "./Overlays";
 import { SimDriver } from "./SimDriver";
 import { TestObjects } from "./TestObjects";
 import { mergeBoxes, std } from "./util";
+import { C } from "@/lib/theme";
 
 const FLOOR_Y = -0.85;
 
@@ -36,6 +39,10 @@ function Env() {
   return null;
 }
 
+/** Lower-powered devices: phones, tablets and small windows render at a lower ceiling and with a smaller shadow map. */
+const LIGHT_DEVICE = typeof window !== "undefined" && (window.innerWidth < 1000 || window.matchMedia("(pointer: coarse)").matches);
+const MAX_DPR = LIGHT_DEVICE ? 1.25 : 1.5;
+
 function Lights() {
   const sun = useRef<THREE.DirectionalLight>(null);
   const hemi = useRef<THREE.HemisphereLight>(null);
@@ -55,7 +62,7 @@ function Lights() {
         intensity={1.9}
         color="#f3f0e8"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={LIGHT_DEVICE ? [1024, 1024] : [2048, 2048]}
         shadow-radius={4}
         shadow-bias={-0.0004}
         shadow-normalBias={0.01}
@@ -66,10 +73,44 @@ function Lights() {
         shadow-camera-near={0.5}
         shadow-camera-far={7}
       />
-      <hemisphereLight ref={hemi} args={["#7fa6b8", "#0b1219", 0.6]} />
+      <hemisphereLight ref={hemi} args={["#7fa6b8", C.ground, 0.6]} />
       <pointLight ref={fill} position={[-1.6, 1.4, -1.2]} intensity={2.5} decay={2} color="#c9d6e0" />
     </>
   );
+}
+
+/**
+ * Room backdrop: a dim radial falloff behind the rig instead of a flat fill, so the tank reads as lit in a dark lab.
+ * Screen-space texture; the feed pass swaps the background for its fog colour, so the camera feed is unaffected.
+ */
+function Backdrop() {
+  const tex = useMemo(() => {
+    const n = 256;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = n;
+    const g = cv.getContext("2d")!;
+    const grad = g.createRadialGradient(n * 0.5, n * 0.38, 0, n * 0.5, n * 0.45, n * 0.75);
+    grad.addColorStop(0, "#132331");
+    grad.addColorStop(0.55, "#0b151e");
+    grad.addColorStop(1, C.ground);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, n, n);
+    // a little noise breaks 8-bit banding in the dark ramp
+    const img = g.getImageData(0, 0, n, n);
+    const rand = mulberry32(11);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const d = (rand() - 0.5) * 3;
+      img.data[i] += d;
+      img.data[i + 1] += d;
+      img.data[i + 2] += d;
+    }
+    g.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, []);
+  useEffect(() => () => tex.dispose(), [tex]);
+  return <primitive attach="background" object={tex} />;
 }
 
 /** Dark lab room: concrete floor with a faint grid and a steel table under the tank. */
@@ -113,16 +154,19 @@ function DevHooks() {
 }
 
 export function LabScene() {
+  // Adaptive quality: if the frame rate cannot hold, drop to 1x pixels for the rest of the session (no flip-flopping).
+  const [dpr, setDpr] = useState<[number, number]>([1, MAX_DPR]);
   return (
     <Canvas
-      dpr={[1, 1.5]}
+      dpr={dpr}
       shadows={{ type: THREE.PCFShadowMap }}
       frameloop="always"
       gl={{ antialias: true, powerPreference: "high-performance" }}
       camera={{ fov: 40, near: 0.02, far: 40, position: INITIAL_CAMERA }}
       onPointerMissed={() => useSimStore.getState().selectObject(null)}
     >
-      <color attach="background" args={["#0b1219"]} />
+      <PerformanceMonitor onDecline={() => setDpr([1, 1])} />
+      <Backdrop />
       <SimDriver />
       <CameraRig />
       <Env />

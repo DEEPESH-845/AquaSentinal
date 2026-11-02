@@ -1,0 +1,66 @@
+{
+  "about": "Hand-labelled inspection instructions for mission-parsing accuracy. Labels state what a correct interpretation is, not what any parser produces. Written for the hackathon evaluation; not collected from real operators.",
+  "fields": ["objective", "targets", "scan_pattern", "reduce_speed_on_degradation", "stop_on_unsafe_visibility"],
+  "cases": [
+    {
+      "id": "demo",
+      "text": "Inspect the pipeline from left to right. Identify the loose cable and foreign objects. Track them, record their coordinates and adapt the inspection speed when visibility deteriorates.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["loose_cable", "foreign_object"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "brief",
+      "text": "Inspect the submerged pipeline from left to right. Identify loose cables and foreign objects. Track any relevant objects and record their coordinates. Reduce scanning speed when visibility deteriorates and stop if visibility becomes unreliable.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["loose_cable", "foreign_object"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "rtl-valve",
+      "text": "Run along the pipe right to left and check the valve and both flanges.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["valve", "pipe_joint"], "scan_pattern": "right_to_left", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "survey-zigzag",
+      "text": "Sweep the entire tank floor in a zigzag and log anything that does not belong there.",
+      "expected": { "objective": "area_survey", "targets": ["foreign_object"], "scan_pattern": "serpentine", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "fell-in",
+      "text": "Someone dropped a spanner near the line. Find it.",
+      "expected": { "objective": "target_search", "targets": ["foreign_object"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "keep-going",
+      "text": "Check the pipeline for loose cables, left to right, and keep going even if the water gets murky.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["loose_cable"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": false }
+    },
+    {
+      "id": "no-slow",
+      "text": "Inspect the pipeline left to right for debris. Do not slow down for poor visibility.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["debris"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": false, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "panel",
+      "text": "Look at the concrete inspection panel and tell me if anything is lying on it.",
+      "expected": { "objective": "target_search", "targets": ["inspection_panel", "foreign_object"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "hose",
+      "text": "There may be a stray hose wrapped around the pipeline. Scan the line from the right end.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["loose_cable"], "scan_pattern": "right_to_left", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "joints-only",
+      "text": "Only the pipe joints this time, nothing else. Left to right.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["pipe_joint"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "rocks-cables",
+      "text": "Survey everything for rocks and cables, back and forth.",
+      "expected": { "objective": "area_survey", "targets": ["debris", "loose_cable"], "scan_pattern": "serpentine", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    },
+    {
+      "id": "pause-murky",
+      "text": "Go over the pipeline looking for foreign objects and pause whenever you can no longer see clearly.",
+      "expected": { "objective": "pipeline_inspection", "targets": ["foreign_object"], "scan_pattern": "left_to_right", "reduce_speed_on_degradation": true, "stop_on_unsafe_visibility": true }
+    }
+  ]
+}

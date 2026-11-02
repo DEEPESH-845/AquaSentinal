@@ -40,6 +40,10 @@ CREATE INDEX IF NOT EXISTS obs_mission ON observations(mission_id);
 CREATE TABLE IF NOT EXISTS summaries (
   mission_id TEXT PRIMARY KEY, created_at REAL NOT NULL, record TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS model_executions (
+  id TEXT PRIMARY KEY, created_at REAL NOT NULL, model TEXT NOT NULL, classification TEXT NOT NULL, record TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS exe_created ON model_executions(created_at);
 """
 
 
@@ -168,6 +172,19 @@ class Repository:
 
     def save_summary(self, mission_id: str, summary: dict[str, Any]) -> None:
         self._exec("INSERT OR REPLACE INTO summaries(mission_id, created_at, record) VALUES (?,?,?)", (mission_id, time.time(), json.dumps(summary)))
+
+    def save_execution(self, rec: dict[str, Any]) -> None:
+        """One Meta model request: references, timing, outcome and LIVE_META / LIVE_META_FAILED / MOCKED. Never content or keys."""
+        self._exec(
+            "INSERT OR REPLACE INTO model_executions VALUES (?,?,?,?,?)", (rec["id"], time.time(), rec["model"], rec["classification"], json.dumps(rec))
+        )
+
+    def executions(self, limit: int = 200) -> list[dict[str, Any]]:
+        rows = self._all("SELECT record FROM model_executions ORDER BY created_at DESC LIMIT ?", (limit,))
+        return [json.loads(r["record"]) for r in rows]
+
+    def execution_counts(self) -> dict[str, int]:
+        return {r["classification"]: r["n"] for r in self._all("SELECT classification, COUNT(*) AS n FROM model_executions GROUP BY classification")}
 
     def get_summary(self, mission_id: str) -> dict[str, Any] | None:
         rows = self._all("SELECT record FROM summaries WHERE mission_id=?", (mission_id,))

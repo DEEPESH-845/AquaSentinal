@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Download, FileText, RotateCcw } from "lucide-react";
+import { Check, Download, FileText, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api/client";
 import type { InspectionReport } from "@/lib/api/types";
@@ -9,28 +9,29 @@ import { GANTRY } from "@/lib/sim/constants";
 import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
 import { Btn, CardHead, SourceTag, f1, f2, human, isTargetClass, pad2, pct, providerSource } from "./shared";
+import { C } from "@/lib/theme";
 
 const MAP_W = 300;
 const MAP_H = (MAP_W * GANTRY.travelY) / GANTRY.travelX;
 
 /** Plan view of the inspection: region, uninspected strips, capture path, observed assets. Gantry cm, origin top left. */
-function ReportMap({ r }: { r: InspectionReport }) {
+function ReportMap({ r, hot }: { r: InspectionReport; hot?: number | null }) {
   const sx = (x: number) => (x / GANTRY.travelX) * MAP_W;
   const sy = (y: number) => (y / GANTRY.travelY) * MAP_H;
   const reg = r.mission.spec.region;
   return (
     <svg viewBox={`0 0 ${MAP_W} ${MAP_H}`} className="w-full border border-line-strong bg-panel-2/60" role="img" aria-label="Inspection map">
-      <rect x={sx(reg.xMin)} y={sy(reg.yMin)} width={sx(reg.xMax - reg.xMin)} height={Math.max(1, sy(reg.yMax - reg.yMin))} fill="none" stroke="#34465a" strokeDasharray="3 3" />
+      <rect x={sx(reg.xMin)} y={sy(reg.yMin)} width={sx(reg.xMax - reg.xMin)} height={Math.max(1, sy(reg.yMax - reg.yMin))} fill="none" stroke={C.lineStrong} strokeDasharray="3 3" />
       {r.uninspectedAreas.map((u, i) => (
-        <rect key={i} x={sx(u.xMin)} y={sy(u.yMin)} width={sx(u.xMax - u.xMin)} height={sy(u.yMax - u.yMin)} fill="#e5484d" fillOpacity={0.14} />
+        <rect key={i} x={sx(u.xMin)} y={sy(u.yMin)} width={sx(u.xMax - u.xMin)} height={sy(u.yMax - u.yMin)} fill={C.danger} fillOpacity={0.14} />
       ))}
-      <polyline points={r.path.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ")} fill="none" stroke="#3db9b0" strokeOpacity={0.6} strokeWidth={1} />
+      <polyline points={r.path.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ")} fill="none" stroke={C.teal} strokeOpacity={0.6} strokeWidth={1} />
       {r.path.map((p) => (
-        <circle key={p.captureId} cx={sx(p.x)} cy={sy(p.y)} r={2} fill={p.reason === "REOBSERVE" ? "#f2a93b" : "#3db9b0"} />
+        <circle key={p.captureId} cx={sx(p.x)} cy={sy(p.y)} r={hot === p.seq ? 4.5 : 2} fill={p.reason === "REOBSERVE" ? C.amber : C.teal} stroke={hot === p.seq ? C.text : "none"} style={{ transition: "r 160ms ease-out" }} />
       ))}
       {r.assets.map((a) => (
         <g key={a.assetId}>
-          <rect x={sx(a.x) - 3} y={sy(a.y) - 3} width={6} height={6} fill="none" stroke={isTargetClass(a.label) ? "#f2a93b" : "#8b98a5"} strokeWidth={1.2} />
+          <rect x={sx(a.x) - 3} y={sy(a.y) - 3} width={6} height={6} fill="none" stroke={isTargetClass(a.label) ? C.amber : C.muted} strokeWidth={1.2} />
         </g>
       ))}
     </svg>
@@ -44,6 +45,17 @@ function download(name: string, text: string, type: string) {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** True for 1.6 s after `flash()`: a confirmation that the export was handed to the browser. */
+function useFlash(): [boolean, () => void] {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (!on) return;
+    const id = window.setTimeout(() => setOn(false), 1600);
+    return () => window.clearTimeout(id);
+  }, [on]);
+  return [on, () => setOn(true)];
 }
 
 function Metrics({ r }: { r: InspectionReport }) {
@@ -67,6 +79,55 @@ function Metrics({ r }: { r: InspectionReport }) {
         </div>
       ))}
     </div>
+  );
+}
+
+const STATE_TONE: Record<string, string> = { NORMAL_VISIBILITY: "text-teal", INSPECTION_PAUSED: "text-danger", OPERATOR_INTERVENTION_REQUIRED: "text-danger" };
+
+/**
+ * Evidence timeline: every stored capture in order, with where it was taken, why, what the controller believed about
+ * the water, what the image itself measured, and which tracked assets were first seen in it. All from the stored report.
+ */
+function EvidenceTimeline({ r, onHot }: { r: InspectionReport; onHot: (seq: number | null) => void }) {
+  const firstSeen = new Map<string, InspectionReport["assets"]>();
+  for (const a of r.assets) {
+    const id = a.captureIds[0];
+    if (id) firstSeen.set(id, [...(firstSeen.get(id) ?? []), a]);
+  }
+  return (
+    <ol className="mt-1 max-h-56 overflow-y-auto border-l border-line pl-3" data-testid="evidence-timeline" onMouseLeave={() => onHot(null)}>
+      {r.path.map((p) => {
+        const seen = firstSeen.get(p.captureId) ?? [];
+        return (
+          <li key={p.captureId} className="relative py-1" onMouseEnter={() => onHot(p.seq)}>
+            <span className={clsx("absolute -left-[15.5px] top-[9px] h-[6px] w-[6px] rounded-full", p.reason === "REOBSERVE" ? "bg-amber" : !p.cameraOnline ? "bg-danger" : "bg-teal")} />
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <span className="value text-[11px] text-text">#{p.seq}</span>
+              <span className="value text-[10px] text-dim">{f1(p.t)} s</span>
+              <span className="label text-[9px]">{p.reason}</span>
+              <span className="value text-[10px] text-muted">
+                ({f1(p.x)}, {f1(p.y)}) cm
+              </span>
+              <span className={clsx("label text-[9px]", STATE_TONE[p.perceptionState] ?? "text-amber")}>{p.perceptionState.replace(/_/g, " ")}</span>
+            </div>
+            <div className="value text-[10px] text-dim">
+              sim vis {p.simulated ? pct(p.simulated.visibility, 0) : "n/a"} / image {p.imageVisibility !== null ? `${pct(p.imageVisibility, 0)} ${p.imageBand?.toLowerCase() ?? ""}` : "n/a"}
+              {p.duplicateOf && " / duplicate frame, segmentation reused"}
+              {!p.cameraOnline && <span className="text-danger"> / camera offline</span>}
+            </div>
+            {seen.length > 0 && (
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                {seen.map((a) => (
+                  <span key={a.assetId} className={clsx("sim-tag", isTargetClass(a.label) && "border-amber/60! text-amber!")} title={`${a.status === "UNVERIFIED_ANOMALY_CANDIDATE" ? "Unverified anomaly candidate" : "Observed"}; ${a.observations} observations; ${a.sources.join(" + ")}`}>
+                    NEW {human(a.label)} {a.assetId.slice(-6)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -107,6 +168,9 @@ export function ReportCard() {
   const mission = useMissionStore((s) => s.mission);
   const missionResult = useSimStore((s) => s.missionResult);
   const [showPath, setShowPath] = useState(false);
+  const [hot, setHot] = useState<number | null>(null);
+  const [savedJson, flashJson] = useFlash();
+  const [savedMd, flashMd] = useFlash();
 
   if (!r) {
     return (
@@ -134,12 +198,22 @@ export function ReportCard() {
         note={r.mission.instruction}
         right={
           <div className="flex shrink-0 gap-1.5">
-            <Btn onClick={() => download(`${r.mission.id}.json`, JSON.stringify(r, null, 2), "application/json")} label="Export JSON">
-              <Download size={14} /> JSON
+            <Btn
+              onClick={() => {
+                download(`${r.mission.id}.json`, JSON.stringify(r, null, 2), "application/json");
+                flashJson();
+              }}
+              label="Export JSON"
+              className={savedJson ? "border-teal! text-teal!" : undefined}
+            >
+              {savedJson ? <Check size={14} /> : <Download size={14} />} JSON
             </Btn>
-            <a className="btn inline-flex items-center gap-1.5" href={api.reportMarkdownUrl(r.mission.id)} download aria-label="Export Markdown">
-              <FileText size={14} /> MD
+            <a className={clsx("btn inline-flex items-center gap-1.5", savedMd && "border-teal! text-teal!")} href={api.reportMarkdownUrl(r.mission.id)} download aria-label="Export Markdown" onClick={flashMd}>
+              {savedMd ? <Check size={14} /> : <FileText size={14} />} MD
             </a>
+            <span className="sr-only" role="status">
+              {savedJson || savedMd ? "Export started" : ""}
+            </span>
           </div>
         }
       />
@@ -177,7 +251,7 @@ export function ReportCard() {
           </div>
         </div>
         <div>
-          <ReportMap r={r} />
+          <ReportMap r={r} hot={hot} />
           <div className="value mt-1 flex flex-wrap gap-x-3 text-[9px] text-dim">
             <span className="text-teal">o capture</span>
             <span className="text-amber">o re-observe</span>
@@ -207,22 +281,9 @@ export function ReportCard() {
         </div>
       </div>
       <button type="button" className="label mt-2 flex items-center gap-1.5 hover:text-text" onClick={() => setShowPath((v) => !v)} aria-expanded={showPath}>
-        <span className="value text-[10px] text-dim">{showPath ? "-" : "+"}</span> Observed objects and capture path
+        <span className="value text-[10px] text-dim">{showPath ? "-" : "+"}</span> Evidence timeline ({r.path.length} captures, {r.assets.length} tracked objects)
       </button>
-      {showPath && (
-        <div className="mt-1 max-h-40 overflow-y-auto border border-line bg-ground/60 px-2 py-1 font-mono text-[10px] leading-[15px]">
-          {r.assets.map((a) => (
-            <div key={a.assetId} className={isTargetClass(a.label) ? "text-amber" : "text-muted"}>
-              {a.assetId.slice(-6)} {human(a.label).padEnd(16)} ({f1(a.x)}, {f1(a.y)}) {a.observations} obs, {a.sources.join("+")}
-            </div>
-          ))}
-          {r.path.map((p) => (
-            <div key={p.captureId} className="text-dim">
-              #{p.seq} {p.reason.padEnd(9)} ({f1(p.x)}, {f1(p.y)}) {p.perceptionState.toLowerCase().replace(/_/g, " ")}, sim vis {p.simulated ? pct(p.simulated.visibility, 0) : "n/a"}, image {p.imageVisibility !== null ? pct(p.imageVisibility, 0) : "n/a"}
-            </div>
-          ))}
-        </div>
-      )}
+      {showPath && <EvidenceTimeline r={r} onHot={setHot} />}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {mission?.id === r.mission.id && (
           <Btn onClick={replay} title="Same plan, same scenario, same seed: the twin reproduces the run. Not recorded as a new inspection.">

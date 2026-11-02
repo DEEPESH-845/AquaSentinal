@@ -1,0 +1,277 @@
+{
+  "classification": "SIMULATED",
+  "plan": "fixture-pipeline",
+  "generatedBy": "npm run eval:adaptive",
+  "rows": [
+    {
+      "preset": "A",
+      "name": "Clear-water pipeline",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 9,
+        "unreliableCaptures": 0,
+        "reobservations": 3,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 28.242
+      }
+    },
+    {
+      "preset": "B",
+      "name": "Loose cable",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 9,
+        "unreliableCaptures": 0,
+        "reobservations": 3,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 28.242
+      }
+    },
+    {
+      "preset": "C",
+      "name": "Foreign objects",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 9,
+        "unreliableCaptures": 0,
+        "reobservations": 3,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 28.242
+      }
+    },
+    {
+      "preset": "D",
+      "name": "Partial occlusion",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 4,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 9,
+        "unreliableCaptures": 0,
+        "reobservations": 3,
+        "pauses": 0,
+        "confirmedTargets": 4,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 28.242
+      }
+    },
+    {
+      "preset": "E",
+      "name": "Turbidity increase",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 3,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 1,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 8,
+        "unreliableCaptures": 0,
+        "reobservations": 2,
+        "pauses": 1,
+        "confirmedTargets": 4,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 45.15
+      }
+    },
+    {
+      "preset": "F",
+      "name": "Lighting degradation",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 4,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 8,
+        "unreliableCaptures": 0,
+        "reobservations": 2,
+        "pauses": 0,
+        "confirmedTargets": 2,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 28.658
+      }
+    },
+    {
+      "preset": "G",
+      "name": "Segmentation failure",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 9,
+        "unreliableCaptures": 0,
+        "reobservations": 3,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 28.242
+      }
+    },
+    {
+      "preset": "H",
+      "name": "Camera disconnect",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 4,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 9,
+        "unreliableCaptures": 0,
+        "reobservations": 3,
+        "pauses": 1,
+        "confirmedTargets": 5,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 35.192
+      }
+    },
+    {
+      "preset": "I",
+      "name": "Gantry limit",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 4,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 10,
+        "unreliableCaptures": 0,
+        "reobservations": 4,
+        "pauses": 0,
+        "confirmedTargets": 5,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 31.542
+      }
+    },
+    {
+      "preset": "J",
+      "name": "Multiple targets",
+      "deterministic": true,
+      "fixed": {
+        "outcome": "COMPLETED",
+        "captures": 6,
+        "unreliableCaptures": 0,
+        "reobservations": 0,
+        "pauses": 0,
+        "confirmedTargets": 7,
+        "falsePositives": 1,
+        "coverage": 1,
+        "durationS": 18.267
+      },
+      "adaptive": {
+        "outcome": "COMPLETED",
+        "captures": 9,
+        "unreliableCaptures": 0,
+        "reobservations": 3,
+        "pauses": 0,
+        "confirmedTargets": 7,
+        "falsePositives": 0,
+        "coverage": 1,
+        "durationS": 28.242
+      }
+    }
+  ]
+}

@@ -20,7 +20,7 @@ from app.main import create_app
 from app.mission.executor import BackendExecutor
 from app.schemas import MissionSpec
 
-from .conftest import DEMO_INSTRUCTION, chat_json, chat_tool_call, demo_wav, id_mask_png, sam_line, sse, synthetic_frame
+from .conftest import DEMO_INSTRUCTION, FAKE_KEY, chat_json, chat_tool_call, demo_wav, id_mask_png, sam_line, sse, synthetic_frame
 
 CABLE_BOX = (100, 200, 260, 260)
 ROPE_BOX = (400, 120, 470, 200)
@@ -113,6 +113,21 @@ def test_full_voice_to_report_pipeline(live_settings, meta):
         assert summary_req["response_format"]["json_schema"]["name"] == "InspectionSummary"
         usage = c.get("/api/system/status").json()["usage"]
         assert usage["sam-3.1"]["images"] == 3 and usage["muse-voice-transcribe-1.0"]["audioMs"] == 4200 and usage["muse-spark-1.3"]["requests"] == 4
+
+        # The execution log records every request, classified MOCKED because the transport is a mock, never LIVE_META.
+        log = c.get("/api/evidence/model-executions").json()
+        exes = log["executions"]
+        assert log["transport"] == "MOCK_TRANSPORT" and log["counts"] == {"MOCKED": 8}
+        ops = sorted(e["operation"] for e in exes)
+        assert ops == sorted(["transcription", "mission_planning", "mission_planning", "frame_reasoning", "segmentation", "segmentation", "segmentation", "report_summary"])
+        assert all(e["success"] and e["durationMs"] is not None and e["requestAt"] <= e["responseAt"] for e in exes)
+        planning = [e for e in exes if e["operation"] == "mission_planning"]
+        assert all(e["inputRef"].startswith("instruction:sha1=") for e in planning) and any("tool_calls=create_inspection_mission" in e["outputRef"] for e in planning)
+        assert all(e["inputRef"].startswith("capture:") for e in exes if e["operation"] == "segmentation")
+        raw = json.dumps(log)
+        assert FAKE_KEY not in raw and "data:image" not in raw and DEMO_INSTRUCTION[:40] not in raw, "references only: no key, image or instruction text"
+        pre = c.get("/api/system/preflight").json()
+        assert pre["checks"][3]["id"] == "meta_live" and not pre["liveMetaReady"], "mocked calls never verify live connectivity"
     assert not [q for q in meta.queues.values() if q], "every mocked response was consumed"
 
 
@@ -133,6 +148,8 @@ def test_spark_failure_is_reported_not_faked(live_settings, meta):
     with TestClient(create_app(live_settings, meta_transport=meta.transport)) as c:
         r = c.post("/api/ai/interpret", json={"instruction": DEMO_INSTRUCTION})
         assert r.status_code == 401 and "Muse Spark request failed" in r.json()["error"]
+        [failed] = c.get("/api/evidence/model-executions").json()["executions"]
+        assert not failed["success"] and failed["status"] == 401 and failed["classification"] == "MOCKED" and failed["attempts"] == 1
         # The operator can explicitly choose the labelled offline parser instead.
         r = c.post("/api/ai/interpret?offline=true", json={"instruction": DEMO_INSTRUCTION})
         assert r.status_code == 200 and r.json()["provider"] == "OFFLINE_RULE_PARSER"

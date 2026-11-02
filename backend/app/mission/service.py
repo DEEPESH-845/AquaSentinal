@@ -6,6 +6,7 @@ Status transitions are enforced here; the HTTP layer only maps errors to status 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from typing import Any
@@ -126,7 +127,7 @@ class MissionService:
         registry.bind("get_camera_status", camera)
         registry.bind("create_inspection_mission", create)
         try:
-            outcome = await self.spark.plan(instruction, registry)
+            outcome = await self.spark.plan(instruction, registry, ref=f"instruction:sha1={hashlib.sha1(instruction.encode()).hexdigest()[:10]} chars={len(instruction)}")
         except PlanningFailed as e:
             raise MissionError(502, str(e), {"timeline": [t.model_dump(by_alias=True, mode="json") for t in e.timeline]}) from e
         except MetaAPIError as e:
@@ -193,7 +194,7 @@ class MissionService:
         summary: dict[str, Any]
         if self.spark is not None:
             try:
-                data, latency = await self.spark.summarize({k: report[k] for k in ("mission", "outcome", "assets", "anomalyCandidates", "uninspectedAreas", "segmentation", "path", "disclaimers")})
+                data, latency = await self.spark.summarize({k: report[k] for k in ("mission", "outcome", "assets", "anomalyCandidates", "uninspectedAreas", "segmentation", "path", "disclaimers")}, ref=f"mission:{mission_id}")
                 summary = {
                     "provider": "MUSE_SPARK",
                     "model": self.spark.model,

@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { ApiError, api, type TwinContext } from "@/lib/api/client";
-import type { CaptureResult, EventEnvelope, HistoryItem, InspectionReport, MissionRecord, SystemStatus } from "@/lib/api/types";
+import type { CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
 import { PushToTalk } from "@/lib/audio/wav";
 import { useSimStore } from "@/lib/sim/store";
 import type { CaptureRequest, MissionResult } from "@/lib/sim/types";
@@ -32,11 +32,25 @@ interface VoiceState {
   durationMs?: number;
 }
 
+/** The last Voice Transcribe result and where its audio came from, so the UI never shows a recorded file as a live voice. */
+export type TranscriptView = TranscriptResult & { source: VoiceInputSource };
+
+/** Prepared audio of the demo instruction (synthetic speech, macOS `say`). Always labelled RECORDED_INPUT. */
+export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
+
+let interpretCtrl: AbortController | null = null;
+
 interface MissionStore {
   backend: BackendState;
+  /** null until the first successful status read, and again whenever the backend stops answering: unknown is never shown as healthy */
   system: SystemStatus | null;
+  /** wall-clock ms of the last successful status read */
+  lastStatusOkAt: number | null;
   instruction: string;
   voice: VoiceState;
+  transcript: TranscriptView | null;
+  preflight: Preflight | null;
+  executionLog: ExecutionLog | null;
   interpreting: boolean;
   interpretError: string | null;
   /** the error came from Muse Spark, so the operator may choose the labelled offline parser */
@@ -56,7 +70,12 @@ interface MissionStore {
   setInstruction: (s: string) => void;
   startVoice: () => Promise<void>;
   stopVoice: () => Promise<void>;
+  /** Sends the prepared recording through Voice Transcribe. Returns the transcript, or null with voice.error set. */
+  transcribeRecorded: () => Promise<string | null>;
+  refreshEvidence: () => Promise<void>;
   interpret: (offline?: boolean) => Promise<MissionRecord | null>;
+  /** Aborts a pending planning request. The backend may still record the plan; it is not shown and cannot run unapproved. */
+  cancelInterpret: () => void;
   discard: () => void;
   approve: () => Promise<boolean>;
   pause: () => void;
@@ -94,9 +113,13 @@ export function twinContext(): TwinContext {
 
 export const useMissionStore = create<MissionStore>((set, get) => ({
   backend: "CONNECTING",
+  lastStatusOkAt: null,
   system: null,
   instruction: "",
   voice: { state: "IDLE" },
+  transcript: null,
+  preflight: null,
+  executionLog: null,
   interpreting: false,
   interpretError: null,
   canFallBack: false,
@@ -113,9 +136,10 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
 
   refreshStatus: async () => {
     try {
-      set({ system: await api.status(), backend: "ONLINE" });
+      set({ system: await api.status(), backend: "ONLINE", lastStatusOkAt: Date.now() });
     } catch {
-      set({ backend: "OFFLINE" });
+      // a stale status would keep showing providers LIVE behind an unreachable backend
+      set({ backend: "OFFLINE", system: null });
     }
   },
 
@@ -148,12 +172,32 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     set({ voice: { state: "TRANSCRIBING" } });
     try {
       const wav = await recorder.stop();
-      const r = await api.transcribe(wav);
-      set({ instruction: r.transcript, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
+      const r = await api.transcribe(wav, "LIVE_MICROPHONE");
+      set({ instruction: r.transcript, transcript: { ...r, source: "LIVE_MICROPHONE" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
     } catch (e) {
       recorder.cancel();
       set({ voice: { state: "ERROR", error: msg(e) } });
     }
+  },
+
+  transcribeRecorded: async () => {
+    set({ voice: { state: "TRANSCRIBING" } });
+    try {
+      const res = await fetch(RECORDED_INSTRUCTION_URL);
+      if (!res.ok) throw new Error(`recorded instruction missing (HTTP ${res.status})`);
+      const r = await api.transcribe(await res.blob(), "RECORDED_INPUT");
+      set({ instruction: r.transcript, transcript: { ...r, source: "RECORDED_INPUT" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
+      void get().refreshEvidence();
+      return r.transcript;
+    } catch (e) {
+      set({ voice: { state: "ERROR", error: msg(e) } });
+      return null;
+    }
+  },
+
+  refreshEvidence: async () => {
+    const [preflight, executionLog] = await Promise.all([api.preflight().catch(() => null), api.executions().catch(() => null)]);
+    set({ preflight, executionLog });
   },
 
   interpret: async (offline = false) => {
@@ -162,17 +206,26 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
       set({ interpretError: "Describe the inspection first." });
       return null;
     }
+    interpretCtrl?.abort();
+    const ctrl = (interpretCtrl = new AbortController());
     set({ interpreting: true, interpretError: null, canFallBack: false, actionError: null });
     try {
-      const r = await api.interpret(text, twinContext(), offline);
+      const r = await api.interpret(text, twinContext(), offline, ctrl.signal);
       set({ mission: r.mission, interpreting: false });
+      void get().refreshEvidence();
       return r.mission;
     } catch (e) {
+      if (ctrl.signal.aborted) {
+        if (interpretCtrl === ctrl) set({ interpreting: false, interpretError: "Planning cancelled. Edit the instruction and plan again." });
+        return null;
+      }
       const live = get().system?.providers.spark.status === "LIVE";
       set({ interpreting: false, interpretError: msg(e), canFallBack: live && !offline && e instanceof ApiError && e.status !== 0 });
       return null;
     }
   },
+
+  cancelInterpret: () => interpretCtrl?.abort(),
 
   discard: () => set({ mission: null, interpretError: null, actionError: null }),
 

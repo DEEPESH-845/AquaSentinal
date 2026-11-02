@@ -53,14 +53,16 @@ class Sam:
         self.client = client
         self.model = model
 
-    async def segment(self, jpeg: bytes, prompt: str, width: int, height: int) -> tuple[list[SamInstance], float]:
+    async def segment(self, jpeg: bytes, prompt: str, width: int, height: int, ref: str = "") -> tuple[list[SamInstance], float]:
         url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
         text, final, latency = await self.client.responses_stream_text(
             {
                 "model": self.model,
                 "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": prompt}, {"type": "input_image", "image_url": url}]}],
                 "metadata": {"mask_encoding": "one_bit", "include_confidence": "true"},
-            }
+            },
+            op="segmentation",
+            input_ref=f"{ref} prompt={prompt!r}".strip(),
         )
         self.client.usage.get(self.model).images += 1
         try:

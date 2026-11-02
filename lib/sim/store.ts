@@ -3,7 +3,7 @@ import { SimEngine } from "./engine";
 import { defaultScenario, presetScenario, type PresetId } from "./scenario";
 import type { Detection, EngineMode, MissionPlan, MissionResult, MissionSnapshot, RLState, RunEvent, RunPhase, Scenario, Telemetry, TestResult } from "./types";
 
-export type SceneId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type SceneId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export type CameraPreset = "A" | "B" | "C" | "D" | "E";
 
 /** Component ids for scene 02 highlighting. Must match the ids used by the 3D components. */
@@ -13,7 +13,14 @@ export type ComponentId = "gantry" | "camera" | "aquarium" | "raspberry-pi" | "a
 export const FEED_ELEMENT_ID = "gantry-camera-feed";
 
 // Scenario edits object XY, so it gets the top-down map like the gantry scenes. Mission control watches the whole tank.
-export const SCENE_CAMERA: Record<SceneId, CameraPreset> = { 1: "A", 2: "A", 3: "D", 4: "B", 5: "A", 6: "B", 7: "A" };
+export const SCENE_CAMERA: Record<SceneId, CameraPreset> = { 1: "A", 2: "A", 3: "D", 4: "B", 5: "A", 6: "B", 7: "A", 8: "A" };
+
+export interface Panels {
+  /** the context card at the bottom */
+  card: boolean;
+  /** telemetry and mission log under the camera feed */
+  telemetry: boolean;
+}
 
 export interface DemoState {
   active: boolean;
@@ -57,6 +64,12 @@ interface SimStore extends SimSnapshot {
   demo: DemoState;
   /** set by the UI when the user wants to see the "simulation to field" closing moment */
   showVision: boolean;
+  /** which mission-control panels are expanded; collapsing them gives the 3D workspace the screen */
+  panels: Panels;
+  setPanels: (patch: Partial<Panels>) => void;
+  /** guided onboarding: null when closed, else the step index */
+  tourStep: number | null;
+  setTourStep: (step: number | null) => void;
 
   publish: () => void;
   setScene: (scene: SceneId) => void;
@@ -120,6 +133,10 @@ export const useSimStore = create<SimStore>((set, get) => {
     selectedObjectId: null,
     demo: { active: false, paused: false, t: 0, phase: 0, run: 0, plan: null, usedFixture: false },
     showVision: false,
+    panels: { card: true, telemetry: true },
+    setPanels: (patch) => set({ panels: { ...get().panels, ...patch } }),
+    tourStep: null,
+    setTourStep: (tourStep) => set({ tourStep }),
 
     publish,
     setScene: (scene) => set({ scene, cameraPreset: SCENE_CAMERA[scene], highlight: null }),
@@ -175,7 +192,7 @@ export const useSimStore = create<SimStore>((set, get) => {
     startDemo: () => {
       engine.reset();
       engine.loadScenario(presetScenario("E"));
-      set({ preset: "E", demo: { active: true, paused: false, t: 0, phase: 0, run: get().demo.run + 1, plan: null, usedFixture: false }, scene: 1, cameraPreset: "A", selectedObjectId: null, showVision: false });
+      set({ preset: "E", demo: { active: true, paused: false, t: 0, phase: 0, run: get().demo.run + 1, plan: null, usedFixture: false }, scene: 8, cameraPreset: SCENE_CAMERA[8], selectedObjectId: null, showVision: false });
       publish();
     },
     pauseDemo: (paused) => set({ demo: { ...get().demo, paused } }),

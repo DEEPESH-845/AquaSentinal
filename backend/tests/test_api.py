@@ -110,6 +110,32 @@ def test_offline_mission_lifecycle_capture_and_report(client):
     assert hist[0]["id"] == mid and hist[0]["captures"] == 4
 
 
+def test_duplicate_reuse_requires_same_inputs_and_a_successful_result(client):
+    """Regression: a scenario G capture at the same pose as an earlier good capture reused its OK segmentation, masking the fault."""
+    frame = lambda: {"frame": ("f.jpg", synthetic_frame(seed=0), "image/jpeg"), "idmask": ("i.png", id_mask_png({1: (100, 200, 260, 260)}), "image/png")}
+    send = lambda seq, **kw: client.post("/api/inspection/capture", data={"meta": capture_meta("manual", seq, **kw)}, files=frame()).json()
+    first = send(0)
+    assert first["segmentations"][0]["status"] == "OK"
+    faulted = send(1, perceptionFault="SEGMENTATION_FAILURE")
+    assert faulted["duplicateOf"] is None and faulted["segmentations"][0]["status"] == "FAILED"
+    retried = send(2, perceptionFault="SEGMENTATION_FAILURE")
+    assert retried["duplicateOf"] is None, "a failed result is retried, never reused"
+    send(3)
+    reused = send(4)
+    assert reused["duplicateOf"] is not None and reused["segmentations"][0]["status"] == "REUSED"
+    narrowed = send(5, targets=["valve"])
+    assert narrowed["duplicateOf"] is None, "different targets are a different question"
+
+
+def test_preflight_reports_missing_credentials_as_blockers(client):
+    pre = client.get("/api/system/preflight").json()
+    assert not pre["ready"] and not pre["liveMetaReady"]
+    assert {"credentials", "meta_live", "sam", "voice"} <= set(pre["blockers"])
+    detail = {c["id"]: c["detail"] for c in pre["checks"]}
+    assert detail["mode"].startswith("SIMULATED") and detail["camera"].startswith("SIMULATED")
+    assert client.get("/api/evidence/model-executions").json() == {"transport": "NONE", "counts": {}, "executions": []}
+
+
 def test_capture_validation_and_voice_offline(client):
     bad = client.post("/api/inspection/capture", data={"meta": json.dumps({"missionId": "x"})}, files={"frame": ("f.jpg", b"x", "image/jpeg")})
     assert bad.status_code == 422
@@ -166,3 +192,35 @@ def test_websockets_events_commands_and_invalid_messages(client):
     with client.websocket_connect("/ws/telemetry") as ws:
         t = ws.receive_json()
         assert t["type"] == "telemetry" and t["data"]["gantry"]["estop"] is True
+
+
+def test_cors_allows_listed_origins_and_the_preview_pattern_only(settings):
+    from dataclasses import replace
+
+    app = create_app(replace(settings, cors_origins=("https://aquasentinal.vercel.app",), cors_origin_regex=r"https://aquasentinal-[a-z0-9-]+\.vercel\.app"))
+    with TestClient(app) as c:
+        def allowed(origin: str) -> str | None:
+            r = c.options("/api/health", headers={"Origin": origin, "Access-Control-Request-Method": "GET"})
+            return r.headers.get("access-control-allow-origin")
+
+        assert allowed("https://aquasentinal.vercel.app") == "https://aquasentinal.vercel.app"
+        assert allowed("https://aquasentinal-git-main-team.vercel.app") == "https://aquasentinal-git-main-team.vercel.app"
+        assert allowed("https://evil.example.com") is None
+        assert allowed("https://aquasentinal.vercel.app.evil.com") is None
+
+
+def test_oversized_uploads_are_refused_without_reading_them_whole(live_settings):
+    from app.main import MAX_AUDIO_BYTES, MAX_FRAME_BYTES
+
+    with TestClient(create_app(live_settings)) as c:
+        big = c.post("/api/inspection/capture", data={"meta": capture_meta("m", 0)}, files={"frame": ("f.jpg", b"\xff" * (MAX_FRAME_BYTES + 1), "image/jpeg")})
+        assert big.status_code == 413
+        audio = c.post("/api/voice/transcribe", files={"audio": ("a.wav", b"\0" * (MAX_AUDIO_BYTES + 1), "audio/wav")})
+        assert audio.status_code == 413 and "10 MB" in audio.json()["detail"]
+
+
+def test_cors_origins_from_env_ignore_a_trailing_slash(monkeypatch):
+    from app.config import load_settings
+
+    monkeypatch.setenv("CORS_ORIGINS", "https://aquasentinal.vercel.app/ , https://b.example")
+    assert load_settings().cors_origins == ("https://aquasentinal.vercel.app", "https://b.example")

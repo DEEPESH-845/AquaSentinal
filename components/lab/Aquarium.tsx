@@ -142,6 +142,7 @@ void main() {
 const PARTICLE_VERT = /* glsl */ `
 uniform float uTime;
 uniform float uPixelRatio;
+uniform float uSize;
 attribute float seed;
 void main() {
   vec3 p = position;
@@ -149,7 +150,7 @@ void main() {
   p.z += 0.010 * cos(uTime * 0.21 + seed * 9.4);
   p.y += 0.008 * sin(uTime * 0.17 + seed * 3.1);
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_PointSize = clamp(2.2 * uPixelRatio * (0.6 / -mv.z), 1.0, 3.5 * uPixelRatio);
+  gl_PointSize = clamp(uSize * uPixelRatio * (0.6 / -mv.z), 1.0, 4.0 * uPixelRatio);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -226,7 +227,7 @@ export function Aquarium() {
     const particleMat = new THREE.ShaderMaterial({
       vertexShader: PARTICLE_VERT,
       fragmentShader: PARTICLE_FRAG,
-      uniforms: { uTime: { value: 0 }, uPixelRatio: { value: 1 }, uOpacity: { value: 0.3 } },
+      uniforms: { uTime: { value: 0 }, uPixelRatio: { value: 1 }, uOpacity: { value: 0.3 }, uSize: { value: 2.2 } },
       transparent: true,
       depthWrite: false,
     });
@@ -252,6 +253,9 @@ export function Aquarium() {
       { size: [0.024, 0.014, W + 0.02], at: [-cx, RIM, 0] },
     ]);
     const sand = { geo: buildSandGeometry(), ...makeSandMaterial() };
+    // phones and small screens get a lighter cloud
+    const particleCount = typeof window !== "undefined" && (window.innerWidth < 1000 || window.matchMedia("(pointer: coarse)").matches) ? 700 : 1600;
+    const particles = buildParticles(particleCount);
     /** Per-frame uniform and material updates, driven by the scenario. */
     const update = (t: number, turbidity: number, lighting: number, pixelRatio: number) => {
       sand.uniforms.uTime.value = t;
@@ -266,6 +270,9 @@ export function Aquarium() {
       particleMat.uniforms.uTime.value = t;
       particleMat.uniforms.uPixelRatio.value = pixelRatio;
       particleMat.uniforms.uOpacity.value = 0.2 + 0.35 * turbidity;
+      // silt is more particles, not just brighter ones: a quarter of the cloud in clear water, all of it at full turbidity
+      particleMat.uniforms.uSize.value = 2.0 + 0.8 * turbidity;
+      particles.setDrawRange(0, Math.round(particleCount * (0.25 + 0.75 * turbidity)));
     };
     return {
       glassMat,
@@ -277,7 +284,7 @@ export function Aquarium() {
       particleMat,
       sand,
       seams,
-      particles: buildParticles(400),
+      particles,
       update,
     };
   }, []);

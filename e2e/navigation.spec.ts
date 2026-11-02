@@ -2,12 +2,13 @@ import { expect, test } from "./lab";
 
 const SCENES = [
   [1, "Overview", /Underwater inspection lab/],
-  [2, "System", /System architecture/],
+  [2, "System", /System health and architecture/],
   [3, "Perception", /AI perception/],
   [4, "Navigation", /Gantry and navigation/],
   [5, "Mission", /AI mission control/],
   [6, "Environment", /Environment and scenario/],
   [7, "Report", /Inspection report/],
+  [8, "Intelligence", /New inspection intelligence/],
 ] as const;
 
 test.describe("navigation", () => {
@@ -21,7 +22,7 @@ test.describe("navigation", () => {
     }
   });
 
-  test("keyboard 1..7 and arrows navigate; typing in inputs does not", async ({ lab, page }) => {
+  test("keyboard 1..8 and arrows navigate; typing in inputs does not", async ({ lab, page }) => {
     await lab.open();
     await page.keyboard.press("4");
     await lab.waitFor((s) => s.scene === 4);

@@ -6,6 +6,7 @@ Run: uvicorn app.main:app --port 8000  (from backend/)
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -48,6 +49,8 @@ from .schemas import (
 VERSION = "1.0.0"
 log = logging.getLogger("aquasentinal")
 MAX_FRAME_BYTES = 4 * 1024 * 1024
+# 16 kHz mono WAV is 32 kB/s, so this is about five minutes of speech
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
 @dataclass
@@ -72,7 +75,10 @@ def build_services(settings: Settings, meta_transport=None, serial_factory=None)
     events = EventBus()
     meta = spark = sam = voice = None
     if settings.meta_available:
-        meta = MetaClient(settings.model_api_key, settings.meta_base_url, timeout_s=settings.request_timeout_s, max_retries=settings.max_retries, transport=meta_transport)
+        meta = MetaClient(
+            settings.model_api_key, settings.meta_base_url, timeout_s=settings.request_timeout_s, max_retries=settings.max_retries,
+            transport=meta_transport, on_execution=repo.save_execution,
+        )
         spark, sam, voice = Spark(meta, settings.spark_model), Sam(meta, settings.sam_model), Voice(meta, settings.voice_model)
     hardware = settings.app_mode == "HARDWARE" and settings.hardware_enable and bool(settings.serial_port or serial_factory)
     sim_driver = None
@@ -126,7 +132,13 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
             s.repo.close()
 
     app = FastAPI(title="AquaSentinal", version=VERSION, lifespan=lifespan)
-    app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_origins),
+        allow_origin_regex=settings.cors_origin_regex or None,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     def S(request: Request) -> Services:
         return request.app.state.s
@@ -182,15 +194,51 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         w, h = capture_size()
         return {**settings.public(), "geometry": {"travelX": tx, "travelY": ty, "captureWidth": w, "captureHeight": h}, "perception": perception_defaults()}
 
+    # ------------------------------------------------------------ evidence
+
+    @app.get("/api/evidence/model-executions")
+    async def model_executions(request: Request, limit: int = Query(100, ge=1, le=1000)):
+        """The model execution log. LIVE_META means a successful request to the Meta API endpoint; nothing else does."""
+        s = S(request)
+        return {"transport": s.meta.transport_kind if s.meta else "NONE", "counts": s.repo.execution_counts(), "executions": s.repo.executions(limit)}
+
+    @app.get("/api/system/preflight")
+    async def preflight(request: Request):
+        """Judge-demo readiness, from facts this process can check. Connectivity is only proven by a logged LIVE_META call."""
+        s = S(request)
+        counts = s.repo.execution_counts()
+        live_ok = counts.get("LIVE_META", 0)
+        cam = s.camera.status()
+        checks = [
+            {"id": "backend", "label": "Backend available", "ok": True, "detail": f"FastAPI {VERSION}"},
+            {"id": "db", "label": "Evidence store writable", "ok": s.repo.ping(), "detail": "SQLite"},
+            {"id": "credentials", "label": "Meta credentials loaded", "ok": s.meta is not None, "detail": "MODEL_API_KEY set" if s.meta else "MODEL_API_KEY not set: Meta models cannot run"},
+            {
+                "id": "meta_live", "label": "Meta API connectivity verified", "ok": live_ok > 0,
+                "detail": f"{live_ok} successful live call(s) logged" if live_ok else "no successful live Meta call logged by this backend yet",
+            },
+            {"id": "sam", "label": "SAM 3.1 segmentation available", "ok": s.sam is not None, "detail": settings.sam_model if s.sam else "offline: twin-geometry outlines, labelled"},
+            {"id": "voice", "label": "Voice Transcribe available", "ok": s.voice is not None, "detail": settings.voice_model if s.voice else "offline: typed instruction"},
+            {"id": "camera", "label": "Camera input identified", "ok": True, "detail": "OPENCV device (unverified on the rig)" if cam.get("source") == "OPENCV_DEVICE" else "SIMULATED: digital-twin render"},
+            {"id": "mode", "label": "Simulation or hardware identified", "ok": True, "detail": "HARDWARE (serial GRBL, unverified)" if s.motion.hardware else "SIMULATED gantry: no physical motion"},
+            {"id": "estop", "label": "Emergency stop available", "ok": True, "detail": "latched" if s.motion.snapshot().get("estop") else "armed"},
+        ]
+        blockers = [c["id"] for c in checks if not c["ok"]]
+        return {"ready": not blockers, "liveMetaReady": s.meta is not None and live_ok > 0, "blockers": blockers, "checks": checks}
+
     # ------------------------------------------------------------ voice and AI
 
     @app.post("/api/voice/transcribe", response_model=TranscriptResult)
-    async def transcribe(request: Request, audio: UploadFile = File(...)):
+    async def transcribe(request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource")):
         s = S(request)
+        if input_source not in ("LIVE_MICROPHONE", "RECORDED_INPUT"):
+            raise HTTPException(422, "inputSource must be LIVE_MICROPHONE or RECORDED_INPUT")
         if s.voice is None:
             raise HTTPException(503, "Muse Voice Transcribe is unavailable: MODEL_API_KEY is not configured. Type the instruction instead.")
-        data = await audio.read()
-        body, latency = await s.voice.transcribe(data)
+        data = await audio.read(MAX_AUDIO_BYTES + 1)
+        if not data or len(data) > MAX_AUDIO_BYTES:
+            raise HTTPException(413, "audio missing or larger than 10 MB (about five minutes)")
+        body, latency = await s.voice.transcribe(data, ref=f"audio:{input_source} sha1={hashlib.sha1(data).hexdigest()[:10]}")
         return TranscriptResult(
             transcript=str(body.get("transcript", "")), provider="MUSE_VOICE_TRANSCRIBE", model=settings.voice_model,
             session_id=str(body.get("sessionId", "")), audio_duration_ms=int(body.get("audioDurationMs") or 0), latency_ms=round(latency, 1),
@@ -271,10 +319,10 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
             m = CaptureMeta.model_validate_json(meta)
         except ValidationError as e:
             raise HTTPException(422, e.errors(include_url=False, include_context=False))
-        jpeg = await frame.read()
+        jpeg = await frame.read(MAX_FRAME_BYTES + 1)
         if not jpeg or len(jpeg) > MAX_FRAME_BYTES:
             raise HTTPException(413, "frame missing or larger than 4 MB")
-        ids = await idmask.read() if idmask else None
+        ids = await idmask.read(MAX_FRAME_BYTES + 1) if idmask else None
         if ids and len(ids) > MAX_FRAME_BYTES:
             raise HTTPException(413, "id mask larger than 4 MB")
         w, h = capture_size()

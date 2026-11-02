@@ -1,12 +1,17 @@
 import { expect, test } from "./lab";
 
 const SIZES = [
+  [320, 568],
   [390, 844],
+  [667, 375],
+  [844, 390],
+  [900, 700],
   [768, 1024],
   [1024, 768],
   [1280, 720],
   [1440, 900],
   [1920, 1080],
+  [2560, 1440],
 ] as const;
 
 const overlaps = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) =>
@@ -51,6 +56,9 @@ for (const [w, h] of SIZES) {
       expect(card.y + card.height, `scene ${n} card bottom`).toBeLessThanOrEqual(h + 1);
       expect(overlaps(card, feed), `scene ${n} card covers the feed`).toBe(false);
       expect(await overflow(), `scene ${n} overflow`).toEqual({ doc: 0, body: 0 });
+      // the scene strip fits without scrolling at every width
+      const nav = await page.locator("[data-lab=nav]").evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(nav, `scene ${n} scene strip overflow`).toBeLessThanOrEqual(1);
     }
   });
 }

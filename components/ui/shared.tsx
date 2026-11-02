@@ -1,7 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { gsap } from "@/lib/animations/gsap";
+import { DUR, EASE, prefersReducedMotion } from "@/lib/animations/motion";
 import { useSimStore } from "@/lib/sim/store";
 import type { DetectedClass } from "@/lib/sim/types";
 
@@ -43,8 +45,16 @@ export function SourceTag({ source, className }: { source: Source; className?: s
 export const providerSource = (p: string | null | undefined): Source =>
   p === "MUSE_SPARK" ? "MUSE_SPARK" : p === "SAM_3_1" ? "SAM_3_1" : p === "OPERATOR" ? "OPERATOR" : p === "TEMPLATE_FROM_RECORDS" ? "TEMPLATE" : p === "OFFLINE_FIXTURE" ? "TWIN_TRUTH" : p === "SIM_DETECTOR" ? "SIM_DETECTOR" : "OFFLINE";
 
-export function Dot({ tone }: { tone: "teal" | "amber" | "danger" | "dim" }) {
-  return <span className={clsx("inline-block h-1.5 w-1.5 shrink-0 rounded-full", tone === "teal" ? "bg-teal" : tone === "amber" ? "bg-amber" : tone === "danger" ? "bg-danger" : "bg-dim")} />;
+const DOT_BG = { teal: "bg-teal", amber: "bg-amber", danger: "bg-danger", dim: "bg-dim" } as const;
+
+/** Status dot. `pulse` marks a live heartbeat (a dependency answering right now), never a decoration. */
+export function Dot({ tone, pulse }: { tone: keyof typeof DOT_BG; pulse?: boolean }) {
+  return (
+    <span className="relative inline-flex h-1.5 w-1.5 shrink-0">
+      {pulse && <span className={clsx("absolute inset-0 animate-ping rounded-full opacity-50 [animation-duration:2.4s]", DOT_BG[tone])} />}
+      <span className={clsx("relative inline-block h-1.5 w-1.5 rounded-full", DOT_BG[tone])} />
+    </span>
+  );
 }
 
 /** Object list reference is stable across publishes; positions are read with primitive selectors elsewhere. */
@@ -171,5 +181,56 @@ export function Btn({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Single-choice control. The selection indicator glides to the chosen option (GSAP), so the eye follows the change.
+ * Arrow keys move the choice, as a radio group should.
+ */
+export function Segmented<T extends string>({ options, value, onChange, label, className }: { options: Array<{ id: T; text: string; title?: string }>; value: T; onChange: (v: T) => void; label: string; className?: string }) {
+  const root = useRef<HTMLDivElement>(null);
+  const ind = useRef<HTMLSpanElement>(null);
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    const btn = root.current?.querySelector<HTMLElement>(`[data-seg="${value}"]`);
+    if (!btn || !ind.current) return;
+    const to = { x: btn.offsetLeft, width: btn.offsetWidth };
+    if (first.current || prefersReducedMotion()) gsap.set(ind.current, to);
+    else gsap.to(ind.current, { ...to, duration: DUR.base, ease: EASE.out, overwrite: true });
+    first.current = false;
+  }, [value, options.length]);
+  const move = (d: number) => {
+    const i = options.findIndex((o) => o.id === value);
+    const next = options[(i + d + options.length) % options.length];
+    onChange(next.id);
+    root.current?.querySelector<HTMLElement>(`[data-seg="${next.id}"]`)?.focus();
+  };
+  return (
+    <div ref={root} role="radiogroup" aria-label={label} className={clsx("relative inline-flex border border-line bg-ground/40 p-px", className)}>
+      <span ref={ind} className="pointer-events-none absolute bottom-px left-0 top-px border border-teal/70 bg-teal/10" aria-hidden />
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="radio"
+          aria-checked={o.id === value}
+          tabIndex={o.id === value ? 0 : -1}
+          data-seg={o.id}
+          title={o.title}
+          onClick={() => onChange(o.id)}
+          onKeyDown={(e) => {
+            const d = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+            if (!d) return;
+            e.preventDefault();
+            e.stopPropagation();
+            move(d);
+          }}
+          className={clsx("relative px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.1em] transition-colors duration-200", o.id === value ? "text-teal" : "text-muted hover:text-text")}
+        >
+          {o.text}
+        </button>
+      ))}
+    </div>
   );
 }

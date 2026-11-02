@@ -57,8 +57,16 @@ No live Meta request has been made, so behaviour against the real service (laten
 - Errors map onto the documented envelope `{message, type, code, param}` as `MetaAPIError`.
 - `InferenceQueue`: concurrency limit (`sam_concurrency`, default 2), per-request timeout, in-flight deduplication by frame hash and prompt, cancellation of a mission's requests when it stops.
 - Budgets per mission: 60 SAM requests and 12 Spark calls; beyond that the request is recorded as `SKIPPED_BUDGET` before any money is spent.
-- Near-duplicate frames from the same position reuse the previous segmentation (`REUSED`).
+- Near-duplicate frames from the same position reuse the previous segmentation (`REUSED`), but only when the targets, prompts and fault fixture are identical and the previous result succeeded.
+- A failed or budget-skipped segmentation is always retried, never reused.
 - `UsageTracker` records requests, errors, retries, tokens, images, audio milliseconds, mean latency and an estimated cost using the published Standard-mode prices: Spark $1.25 and $4.25 per million input and output tokens, SAM $2.50 per 1,000 images, Voice $0.18 per audio hour.
+
+## Execution log
+
+Every request leaving `MetaClient` is recorded in the `model_executions` table with model, operation, input and output references, timestamps, duration, attempts, outcome and trace id, and served at `GET /api/evidence/model-executions`.
+The classification is `LIVE_META` for a successful request to the network endpoint, `LIVE_META_FAILED` for a failed one, and `MOCKED` whenever the client was built with `httpx.MockTransport`.
+Records hold references, never keys, audio, images or instruction text.
+docs/META_USAGE_EVIDENCE.md explains how to produce and read live evidence.
 
 ## Offline behaviour
 

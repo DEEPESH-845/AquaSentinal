@@ -25,9 +25,16 @@ test.describe("gantry", () => {
     await page.mouse.click(box.x + 2, box.y + 2);
     await lab.fastForward(1);
     await lab.button(/^stop$/i).click();
+    // Stop holds the carriage where it was stopped: it decelerates (the twin keeps real time, so a frame may pass before
+    // this read) and settles on its stop point instead of continuing to the clicked corner near (0, 0).
+    const stopAt = await lab.state((s) => [s.engine.gantry.x.target, s.engine.gantry.y.target]);
+    expect(stopAt[0]).toBeGreaterThan(50);
+    await lab.fastForward(5);
     const g = await lab.state((s) => s.engine.gantry);
-    expect(g.x.target).toBeCloseTo(g.x.pos, 5);
-    expect(g.y.target).toBeCloseTo(g.y.pos, 5);
+    expect(g.x.target).toBeCloseTo(stopAt[0], 5);
+    expect(g.y.target).toBeCloseTo(stopAt[1], 5);
+    expect(g.x.pos).toBeCloseTo(g.x.target, 2);
+    expect(g.y.pos).toBeCloseTo(g.y.target, 2);
   });
 
   test("invariants hold under invalid store commands", async ({ lab }) => {

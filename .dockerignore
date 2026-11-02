@@ -1,0 +1,7 @@
+# Only backend/ and shared/ are needed by backend/Dockerfile; keep everything else out of the build context.
+*
+!backend/requirements.txt
+!backend/app/**
+!shared/**
+**/__pycache__
+**/*.pyc

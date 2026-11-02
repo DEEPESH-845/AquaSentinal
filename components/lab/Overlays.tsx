@@ -7,9 +7,12 @@ import * as THREE from "three";
 import { CAMERA, GANTRY, TANK, gantryToWorld } from "@/lib/sim/constants";
 import type { SimEngine } from "@/lib/sim/engine";
 import type { ObjectType } from "@/lib/sim/types";
+import { useMissionStore } from "@/lib/store/mission";
 import { useSimStore, type ComponentId } from "@/lib/sim/store";
 import { ARDUINO_POS, PI_POS } from "./Electronics";
 import { AMBER, TEAL, freeRect } from "./util";
+import { C } from "@/lib/theme";
+import { isTargetClass } from "@/components/ui/shared";
 
 const TAN_H = Math.tan((CAMERA.hfovDeg * Math.PI) / 360);
 export const FOOT_HALF_W = CAMERA.lensHeight * TAN_H;
@@ -50,6 +53,7 @@ export function Overlays() {
 
     const path = new THREE.BufferGeometry();
     path.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+    const detMats = Array.from({ length: MAX_RINGS }, () => new THREE.MeshBasicMaterial({ color: AMBER, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide, fog: false }));
     const footMat = lineMat(TEAL, 0.6);
     const frustumMat = lineMat(TEAL, 0.25);
 
@@ -70,7 +74,14 @@ export function Overlays() {
       pathObj: new THREE.Line(path, lineMat(AMBER, 0.55)),
       ring: new THREE.RingGeometry(0.92, 1, 40),
       targetMat: new THREE.MeshBasicMaterial({ color: AMBER, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, fog: false }),
-      detMat: new THREE.MeshBasicMaterial({ color: AMBER, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide, fog: false }),
+      // one material per ring: each ring's colour and strength is its own detection's state
+      detMats,
+      paintRing: (i: number, color: string, opacity: number) => {
+        detMats[i].color.set(color);
+        detMats[i].opacity = opacity;
+      },
+      halo: new THREE.RingGeometry(0.985, 1, 48),
+      haloMat: new THREE.MeshBasicMaterial({ color: TEAL, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, fog: false }),
     };
   }, []);
 
@@ -84,6 +95,18 @@ export function Overlays() {
   }, []);
   const pathLine = useRef<THREE.Line>(null);
   const rings = useRef<Array<THREE.Mesh | null>>([]);
+  const halos = useRef<Array<THREE.Mesh | null>>([]);
+  // twin objects the backend has turned into persistent tracked assets (a mask matched to the object, with an observation)
+  const tracked = useRef(new Set<string>());
+  useEffect(() => {
+    const read = (captures: ReturnType<typeof useMissionStore.getState>["captures"]) => {
+      const ids = new Set<string>();
+      for (const c of captures) for (const sg of c.result?.segmentations ?? []) for (const i of sg.instances) if (i.matchedObjectId && c.result?.observations.length) ids.add(i.matchedObjectId);
+      tracked.current = ids;
+    };
+    read(useMissionStore.getState().captures);
+    return useMissionStore.subscribe((st, prev) => st.captures !== prev.captures && read(st.captures));
+  }, []);
 
   useFrame((state) => {
     const s = useSimStore.getState();
@@ -113,13 +136,16 @@ export function Overlays() {
 
     const det = s.engine.detections;
     const objs = s.engine.scenario.objects;
+    const selected = s.selectedObjectId;
     for (let i = 0; i < MAX_RINGS; i++) {
       const m = rings.current[i];
-      if (!m) continue;
+      const h = halos.current[i];
+      if (!m || !h) continue;
       const d = det[i];
       const o = d && objs.find((ob) => ob.id === d.objectId);
       if (!o) {
         m.visible = false;
+        h.visible = false;
         continue;
       }
       m.visible = true;
@@ -127,6 +153,13 @@ export function Overlays() {
       m.position.set(ox, 0.012, oz);
       const k = Math.max(o.halfExtents[0], o.halfExtents[2]) * 1.1 * (0.7 + 0.4 * d.confidence);
       m.scale.set(k, k, 1);
+      // amber: anomaly candidate class; teal: infrastructure; text: the operator's selection. Locked rings are solid, detected ones faint.
+      res.paintRing(i, o.id === selected ? C.text : isTargetClass(d.class) ? AMBER : TEAL, d.state === "LOCKED" ? 0.8 : 0.38);
+      h.visible = tracked.current.has(o.id);
+      if (h.visible) {
+        h.position.set(ox, 0.0125, oz);
+        h.scale.set(k * 1.35, k * 1.35, 1);
+      }
     }
   });
 
@@ -145,7 +178,19 @@ export function Overlays() {
             rings.current[i] = el;
           }}
           geometry={res.ring}
-          material={res.detMat}
+          material={res.detMats[i]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          visible={false}
+        />
+      ))}
+      {Array.from({ length: MAX_RINGS }, (_, i) => (
+        <mesh
+          key={`h${i}`}
+          ref={(el) => {
+            halos.current[i] = el;
+          }}
+          geometry={res.halo}
+          material={res.haloMat}
           rotation={[-Math.PI / 2, 0, 0]}
           visible={false}
         />
@@ -256,7 +301,7 @@ const overlaps = (a: Rect, b: Rect, m: number) => a.x0 - m < b.x1 && a.x1 + m > 
 function Callout({ id, n, text, register }: { id: ComponentId; n: string; text: string; register: (id: ComponentId, el: HTMLDivElement | null) => void }) {
   const active = useSimStore((s) => s.highlight === id);
   const setHighlight = useSimStore((s) => s.setHighlight);
-  const line = active ? AMBER : "#4a6075";
+  const line = active ? AMBER : C.lineStrong;
   return (
     <Html zIndexRange={[0, 0]} style={{ pointerEvents: "none" }}>
       <div ref={(el) => register(id, el)} style={{ position: "relative", width: 0, height: 0 }}>
@@ -281,7 +326,7 @@ function Callout({ id, n, text, register }: { id: ComponentId; n: string; text: 
             padding: "4px 8px",
             whiteSpace: "nowrap",
             borderColor: active ? AMBER : undefined,
-            color: active ? "#e6edf3" : undefined,
+            color: active ? C.text : undefined,
             transition: "border-color 120ms ease, color 120ms ease",
           }}
         >

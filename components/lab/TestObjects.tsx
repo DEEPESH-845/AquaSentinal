@@ -8,9 +8,9 @@ import { mulberry32 } from "@/lib/sim/rng";
 import { useSimStore } from "@/lib/sim/store";
 import type { TestObject } from "@/lib/sim/types";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { HIGHLIGHT_COLOR, mergeBoxes, setEmissive, std } from "./util";
+import { AMBER, HIGHLIGHT_COLOR, mergeBoxes, setEmissive, std } from "./util";
 
-const SELECT_EMISSIVE = new THREE.Color("#f2a93b");
+const SELECT_EMISSIVE = new THREE.Color(AMBER);
 
 /* ---------- models ---------- */
 

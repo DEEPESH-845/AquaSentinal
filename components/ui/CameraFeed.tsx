@@ -16,27 +16,35 @@ const LABEL_PAD_PX = 8;
 type FeedSize = { w: number; h: number };
 
 const labelText = (d: Detection) => `SIM ${d.class} ${pct(d.confidence)}`;
-// Label sits above the box unless the box touches the frame top; clamp right so it never leaves the feed.
+const labelWidth = (d: Detection) => labelText(d).length * LABEL_CHAR_PX + LABEL_PAD_PX;
+// Label sits above the box unless the box touches the frame top; it right-aligns when left-aligned would leave the feed.
 const labelInside = (d: Detection, feed: FeedSize) => d.bbox[1] * feed.h < 14;
-const labelRight = (d: Detection) => d.bbox[0] + d.bbox[2] > 0.72;
+const labelRight = (d: Detection, feed: FeedSize) => d.bbox[0] * feed.w + labelWidth(d) > feed.w - 2;
 
 /** The label's rectangle in normalised feed coordinates, mirroring where BoundingBoxes places it. */
 function labelRect(d: Detection, feed: FeedSize): [number, number, number, number] {
   const [u, v, w] = d.bbox;
-  const lw = (labelText(d).length * LABEL_CHAR_PX + LABEL_PAD_PX) / feed.w;
-  const x0 = labelRight(d) ? u + w - lw : u;
-  const y0 = labelInside(d, feed) ? v + (labelRight(d) ? 20 : 2) / feed.h : v - 16 / feed.h;
+  const lw = labelWidth(d) / feed.w;
+  const right = labelRight(d, feed);
+  const x0 = right ? u + w - lw : u;
+  const y0 = labelInside(d, feed) ? v + (right ? 20 : 2) / feed.h : v - 16 / feed.h;
   return [x0, y0, x0 + lw, y0 + 14 / feed.h];
 }
 
-/** Anomaly candidates and unknowns get a label; the most confident label wins when two would overlap. */
+/**
+ * Anomaly candidates and unknowns get a label; the most confident label wins when two would overlap.
+ * The state tag (top right) and the position readout (bottom left) are fixed furniture, so labels yield to them too.
+ */
 function labelledIds(detections: Detection[], feed: FeedSize): Set<string> {
-  const placed: Array<[number, number, number, number]> = [];
+  const placed: Array<[number, number, number, number]> = [
+    [1 - 64 / feed.w, 0, 1, 22 / feed.h],
+    [0, 1 - 22 / feed.h, 150 / feed.w, 1],
+  ];
   const ids = new Set<string>();
   for (const d of [...detections].sort((a, b) => b.confidence - a.confidence)) {
     if (!isTargetClass(d.class) && d.class !== "UNKNOWN") continue;
     const r = labelRect(d, feed);
-    if (placed.some((q) => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3])) continue;
+    if (r[0] < 0 || placed.some((q) => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3])) continue;
     placed.push(r);
     ids.add(d.objectId);
   }
@@ -55,18 +63,20 @@ export function CameraFeed() {
   const wide = useSimStore((s) => s.scene === 3);
 
   return (
-    <div className="panel border-line-strong">
+    <div className="panel border-line-strong" data-tour="feed">
       <div className="flex items-center justify-between gap-2 border-b border-line px-2.5 py-1.5">
         <div className="flex items-center gap-2 whitespace-nowrap">
           <span className="label text-text">Camera feed</span>
-          <span className="sim-tag">DIGITAL TWIN</span>
+          <span className="sim-tag" title="Rendered by the digital twin, not a physical camera">
+            <span className="max-[999px]:hidden">DIGITAL </span>TWIN
+          </span>
         </div>
         <span className="value whitespace-nowrap text-[9px] text-muted max-[999px]:hidden">
           {CAMERA.fps} FPS f{frame}
           {wide && ` ${CAMERA.resolution.replace(" (simulated)", "")}`}
         </span>
         {/* compact column: the readout moves up here so it cannot collide with box tags in a 176 or 220 px feed */}
-        <span className="value whitespace-nowrap text-[10px] text-teal min-[1000px]:hidden">
+        <span className="value min-w-0 truncate whitespace-nowrap text-[10px] text-teal min-[1000px]:hidden">
           X {f1(x)}&nbsp;&nbsp;Y {f1(y)}
         </span>
       </div>
@@ -88,7 +98,7 @@ export function CameraFeed() {
           <div className="value pointer-events-none absolute bottom-1.5 left-2 bg-ground/70 px-1 text-[10px] text-teal max-[999px]:hidden">
             X {f1(x)}&nbsp;&nbsp;Y {f1(y)} cm
           </div>
-          <div className="label pointer-events-none absolute right-2 top-1.5 bg-ground/70 px-1 text-[9px]">{m ? m.perception.split("_")[0] : "CAM D"}</div>
+          <div className="label pointer-events-none absolute right-2 top-1.5 bg-ground/70 px-1 text-[9px]">{m ? m.perception.split("_")[0] : "NADIR"}</div>
           <BoundingBoxes />
           {m && !m.online && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-ground" role="status">
@@ -97,6 +107,43 @@ export function CameraFeed() {
             </div>
           )}
         </div>
+      </div>
+      <FeedStatus />
+    </div>
+  );
+}
+
+const PERCEPTION_TONE: Record<string, string> = {
+  NORMAL_VISIBILITY: "text-teal",
+  REDUCED_VISIBILITY: "text-amber",
+  LOW_CONFIDENCE: "text-amber",
+  REOBSERVATION_REQUIRED: "text-amber",
+  INSPECTION_PAUSED: "text-danger",
+  OPERATOR_INTERVENTION_REQUIRED: "text-danger",
+};
+
+/** Mission state under the feed, so progress and the controller's decision sit beside what the camera sees. Driven by the twin's mission snapshot only. */
+function FeedStatus() {
+  const m = useSimStore(
+    useShallow((s) =>
+      s.mission && s.mode === "MISSION" ? { status: s.mission.status, wp: s.mission.waypointIndex, n: s.mission.waypointsPlanned, perception: s.mission.perception, speed: s.mission.speedFraction } : null,
+    ),
+  );
+  const vis = useSimStore((s) => s.telemetry.environment.visibility);
+  const progress = m ? Math.min(1, m.wp / Math.max(1, m.n)) : 0;
+  return (
+    <div className="border-t border-line px-2.5 pb-1.5 pt-1" data-testid="feed-status">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="label text-[9px]">{m ? "Mission" : "Standby"}</span>
+          <span className={clsx("value truncate text-[10px]", m ? PERCEPTION_TONE[m.perception] : "text-dim")}>{m ? `${m.status === "RUNNING" ? m.perception.replace(/_/g, " ") : m.status}` : "no mission running"}</span>
+        </span>
+        <span className="value whitespace-nowrap text-[10px] text-muted">
+          {m ? `WP ${Math.min(m.wp + 1, m.n)}/${m.n}` : ""} <span className={vis < 0.45 ? "text-amber" : "text-text"}>VIS {pct(vis, 0)}</span>
+        </span>
+      </div>
+      <div className="mt-1 h-[2px] w-full bg-line" role="progressbar" aria-label="Mission progress" aria-valuemin={0} aria-valuemax={m?.n ?? 0} aria-valuenow={m ? Math.min(m.wp, m.n) : 0}>
+        <div className={clsx("h-full transition-[width] duration-500 ease-out", m?.status === "PAUSED" ? "bg-amber" : "bg-teal")} style={{ width: `${progress * 100}%` }} />
       </div>
     </div>
   );
@@ -140,8 +187,8 @@ const BoundingBoxes = memo(function BoundingBoxes() {
                 <div
                   className={clsx(
                     "value absolute whitespace-nowrap bg-ground/70 px-1 py-px text-[10px] leading-none",
-                    labelInside(d, feed) ? (labelRight(d) ? "top-5" : "top-0.5") : "-top-4",
-                    labelRight(d) ? "right-0" : "left-0",
+                    labelInside(d, feed) ? (labelRight(d, feed) ? "top-5" : "top-0.5") : "-top-4",
+                    labelRight(d, feed) ? "right-0" : "left-0",
                     target ? "text-amber" : "text-teal",
                   )}
                 >

@@ -10,11 +10,11 @@ import fixturePlan from "../../shared/fixtures/pipeline-plan.json";
  * runs the contract fixture plan and says so in the caption.
  */
 
-export type DemoPhaseId = "OVERVIEW" | "COMMAND" | "PLAN" | "SCAN" | "PERCEIVE" | "ADAPT" | "REPORT";
+export type DemoPhaseId = "INTRO" | "COMMAND" | "PLAN" | "SCAN" | "PERCEIVE" | "ADAPT" | "REPORT";
 
-/** The brief's primary demonstration instruction. */
+/** The judge demo's instruction. public/demo/instruction.wav is this sentence as prepared audio (RECORDED_INPUT). */
 export const DEMO_INSTRUCTION =
-  "Inspect the submerged pipeline from left to right. Identify loose cables and foreign objects. Track any relevant objects and record their coordinates. Reduce scanning speed when visibility deteriorates and stop if visibility becomes unreliable.";
+  "Inspect the pipeline from left to right. Identify the loose cable and foreign objects. Track them, record their coordinates and adapt the inspection speed when visibility deteriorates.";
 
 export interface DemoPhase {
   id: DemoPhaseId;
@@ -27,8 +27,14 @@ export interface DemoPhase {
 }
 
 export const DEMO_PHASES: DemoPhase[] = [
-  { id: "OVERVIEW", title: "Inspection lab", caption: "A pipeline on the floor of a tank, an XY gantry with a downward camera, and a scripted rise in silt.", scene: 1, minSeconds: 7 },
-  { id: "COMMAND", title: "Operator instruction", caption: "The operator describes the inspection in plain language. The backend turns it into a validated mission.", scene: 5, minSeconds: 6, maxSeconds: 25 },
+  {
+    id: "INTRO",
+    title: "New inspection intelligence",
+    caption: "AquaSentinal introduces multimodal, adaptive underwater inspection using Meta AI models. The tank and gantry are inherited context; every step that follows is new, and each is labelled live, simulated or fallback.",
+    scene: 8,
+    minSeconds: 6,
+  },
+  { id: "COMMAND", title: "Operator instruction", caption: "The instruction goes through Voice Transcribe, then Muse Spark turns it into a mission through allowlisted tools. Nothing moves yet.", scene: 5, minSeconds: 6, maxSeconds: 40 },
   { id: "PLAN", title: "Plan approved", caption: "Every waypoint is inside the soft travel limits; speeds and visibility thresholds are bounded before anything moves.", scene: 5, minSeconds: 5 },
   { id: "SCAN", title: "Gantry scans", caption: "The carriage drives home, then follows the plan left to right, capturing a frame at each waypoint.", scene: 4, minSeconds: 8, maxSeconds: 40 },
   { id: "PERCEIVE", title: "Frames analysed", caption: "Each capture goes to the perception pipeline: image quality, segmentation, track association.", scene: 3, minSeconds: 8, maxSeconds: 40 },
@@ -63,7 +69,7 @@ export function stepDemo(d: DemoDirectorState, t: number, engine: SimEngine, pla
   }
   const m = engine.mission;
   switch (phase.id) {
-    case "OVERVIEW":
+    case "INTRO":
     case "PLAN":
       if (elapsed >= phase.minSeconds) {
         if (phase.id === "PLAN" && !d.missionStarted) {
