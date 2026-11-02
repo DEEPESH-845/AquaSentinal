@@ -1,0 +1,108 @@
+{
+ "frame": "clear-x37",
+ "gantryX": 37.057,
+ "gantryY": 20.0,
+ "turbidity": 0.15,
+ "visibility": 0.912,
+ "objects": [
+  {
+   "objectId": "pipe-a",
+   "type": "PIPE_SEGMENT",
+   "box": [
+    0,
+    214,
+    285,
+    265
+   ],
+   "px": 14774
+  },
+  {
+   "objectId": "joint-1",
+   "type": "PIPE_JOINT",
+   "box": [
+    280,
+    199,
+    313,
+    280
+   ],
+   "px": 2199
+  },
+  {
+   "objectId": "pipe-b",
+   "type": "PIPE_SEGMENT",
+   "box": [
+    308,
+    214,
+    618,
+    265
+   ],
+   "px": 11532
+  },
+  {
+   "objectId": "valve-1",
+   "type": "VALVE",
+   "box": [
+    419,
+    204,
+    525,
+    275
+   ],
+   "px": 5555
+  },
+  {
+   "objectId": "joint-2",
+   "type": "PIPE_JOINT",
+   "box": [
+    591,
+    199,
+    639,
+    280
+   ],
+   "px": 2644
+  },
+  {
+   "objectId": "cable-1",
+   "type": "LOOSE_CABLE",
+   "box": [
+    518,
+    313,
+    639,
+    390
+   ],
+   "px": 2007
+  },
+  {
+   "objectId": "rope-1",
+   "type": "DEBRIS",
+   "box": [
+    308,
+    82,
+    411,
+    135
+   ],
+   "px": 1182
+  },
+  {
+   "objectId": "crate-1",
+   "type": "FOREIGN_OBJECT",
+   "box": [
+    124,
+    325,
+    241,
+    425
+   ],
+   "px": 8269
+  },
+  {
+   "objectId": "panel-1",
+   "type": "INSPECTION_PANEL",
+   "box": [
+    0,
+    56,
+    117,
+    176
+   ],
+   "px": 12066
+  }
+ ]
+}
