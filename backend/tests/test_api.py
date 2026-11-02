@@ -207,3 +207,20 @@ def test_cors_allows_listed_origins_and_the_preview_pattern_only(settings):
         assert allowed("https://aquasentinal-git-main-team.vercel.app") == "https://aquasentinal-git-main-team.vercel.app"
         assert allowed("https://evil.example.com") is None
         assert allowed("https://aquasentinal.vercel.app.evil.com") is None
+
+
+def test_oversized_uploads_are_refused_without_reading_them_whole(live_settings):
+    from app.main import MAX_AUDIO_BYTES, MAX_FRAME_BYTES
+
+    with TestClient(create_app(live_settings)) as c:
+        big = c.post("/api/inspection/capture", data={"meta": capture_meta("m", 0)}, files={"frame": ("f.jpg", b"\xff" * (MAX_FRAME_BYTES + 1), "image/jpeg")})
+        assert big.status_code == 413
+        audio = c.post("/api/voice/transcribe", files={"audio": ("a.wav", b"\0" * (MAX_AUDIO_BYTES + 1), "audio/wav")})
+        assert audio.status_code == 413 and "10 MB" in audio.json()["detail"]
+
+
+def test_cors_origins_from_env_ignore_a_trailing_slash(monkeypatch):
+    from app.config import load_settings
+
+    monkeypatch.setenv("CORS_ORIGINS", "https://aquasentinal.vercel.app/ , https://b.example")
+    assert load_settings().cors_origins == ("https://aquasentinal.vercel.app", "https://b.example")

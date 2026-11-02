@@ -53,10 +53,13 @@ fi
 
 # Optional local settings; the shell's own values take precedence
 if [[ -f "$BACKEND/.env.local" ]]; then
-  while IFS='=' read -r key value; do
-    [[ -z "$key" || "$key" == \#* ]] && continue
-    value="${value%\"}"; value="${value#\"}"
-    [[ -z "${!key:-}" ]] && export "$key=$value"
+  # KEY=value, optionally "export KEY=value" and quoted values; CRLF and a missing final newline are fine
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$ ]] || continue
+    key="${BASH_REMATCH[2]}"; value="${BASH_REMATCH[3]}"
+    if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then value="${BASH_REMATCH[1]}"; fi
+    [[ -n "${!key:-}" ]] || export "$key=$value"
   done < "$BACKEND/.env.local"
 fi
 

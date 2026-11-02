@@ -45,9 +45,12 @@ Hardware stays disabled (`APP_MODE=SIMULATION`, `AQUA_HARDWARE_ENABLE=false`).
 
 ## 2. Frontend on Vercel
 
-1. In Vercel, Add New, then Project, and import the repository. `vercel.json` already sets the framework, `npm ci`, a build that runs typecheck, lint and `next build`, security headers, and skips rebuilds for backend-only or docs-only commits.
+1. In Vercel, Add New, then Project, and import the repository. `vercel.json` already sets the framework, `npm ci`, a build that runs typecheck, lint and `next build`, and security headers.
+   `scripts/vercel-ignore.sh` skips the build when nothing the frontend uses changed since the branch's last successful deployment (backend, docs or test changes only).
 2. Under Environment Variables add `NEXT_PUBLIC_BACKEND_URL` = the Render URL, for example `https://aquasentinal-backend.onrender.com` (no trailing slash), for Production and Preview.
-   It is inlined at build time, so redeploy after changing it. A Vercel build without it fails on purpose, with a message saying what to set, instead of shipping a site that points visitors at their own localhost.
+   It is inlined at build time, so redeploy after changing it.
+   A Vercel build without it, or with an `http://` URL, fails on purpose with a message saying what to set: the first would point visitors at their own localhost and the second is blocked as mixed content on the https site.
+   When you redeploy only to pick up a changed value, untick "Use project's Ignore Build Step" in the Redeploy dialog, or the unchanged commit is skipped.
 3. Deploy, then put the production URL into the backend's `CORS_ORIGINS` on Render if you had not already.
 
 With the CLI instead of the dashboard:
@@ -58,6 +61,16 @@ npx vercel env add NEXT_PUBLIC_BACKEND_URL production   # paste the Render URL
 npx vercel env add NEXT_PUBLIC_BACKEND_URL preview
 npx vercel --prod
 ```
+
+## Caveats
+
+- **The backend is public and has no login.** Anyone with its URL can plan missions and upload frames; CORS only stops other websites' pages, not scripts or curl. With `MODEL_API_KEY` set, strangers can spend your Meta quota, so set the key for the demo window and remove it afterwards (the app falls back to labelled offline mode).
+- **Uploads are capped:** frames and ID masks at 4 MB, voice clips at 10 MB (about five minutes), and only that much of an upload is read into memory. The ephemeral disk still collects stored frames until the next restart.
+- **Free hours are per workspace.** An open mission control tab pings the WebSocket every 15 seconds, which keeps the backend awake and uses hours; 750 hours a month covers one service running all month, so a second free service in the same Render workspace can run out.
+- **The URLs follow the project names.** If `aquasentinal` is taken on Vercel or `aquasentinal-backend` on Render, the real URLs differ: copy them into `CORS_ORIGINS`, `CORS_ORIGIN_REGEX` and `NEXT_PUBLIC_BACKEND_URL`. A trailing slash in `CORS_ORIGINS` is ignored.
+- **Preview links are private by default.** Vercel's standard deployment protection asks visitors of preview URLs to log in to Vercel; share the production URL with judges.
+- **Vercel Hobby is for non-commercial use.** A commercial deployment needs the Pro plan.
+- **Hardware stays off.** The hosted backend cannot reach a gantry or camera on your desk; hardware mode is local only.
 
 ## 3. Check the deployment
 

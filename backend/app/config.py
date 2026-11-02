@@ -78,7 +78,7 @@ def load_settings() -> Settings:
     mode = os.environ.get("APP_MODE", "SIMULATION").strip().upper()
     if mode not in ("SIMULATION", "HARDWARE"):
         mode = "SIMULATION"
-    origins = tuple(o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip())
+    origins = tuple(o.strip().rstrip("/") for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip())
     return Settings(
         model_api_key=os.environ.get("MODEL_API_KEY", "").strip(),
         meta_base_url=os.environ.get("META_MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"),

@@ -49,6 +49,8 @@ from .schemas import (
 VERSION = "1.0.0"
 log = logging.getLogger("aquasentinal")
 MAX_FRAME_BYTES = 4 * 1024 * 1024
+# 16 kHz mono WAV is 32 kB/s, so this is about five minutes of speech
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
 @dataclass
@@ -233,7 +235,9 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
             raise HTTPException(422, "inputSource must be LIVE_MICROPHONE or RECORDED_INPUT")
         if s.voice is None:
             raise HTTPException(503, "Muse Voice Transcribe is unavailable: MODEL_API_KEY is not configured. Type the instruction instead.")
-        data = await audio.read()
+        data = await audio.read(MAX_AUDIO_BYTES + 1)
+        if not data or len(data) > MAX_AUDIO_BYTES:
+            raise HTTPException(413, "audio missing or larger than 10 MB (about five minutes)")
         body, latency = await s.voice.transcribe(data, ref=f"audio:{input_source} sha1={hashlib.sha1(data).hexdigest()[:10]}")
         return TranscriptResult(
             transcript=str(body.get("transcript", "")), provider="MUSE_VOICE_TRANSCRIBE", model=settings.voice_model,
@@ -315,10 +319,10 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
             m = CaptureMeta.model_validate_json(meta)
         except ValidationError as e:
             raise HTTPException(422, e.errors(include_url=False, include_context=False))
-        jpeg = await frame.read()
+        jpeg = await frame.read(MAX_FRAME_BYTES + 1)
         if not jpeg or len(jpeg) > MAX_FRAME_BYTES:
             raise HTTPException(413, "frame missing or larger than 4 MB")
-        ids = await idmask.read() if idmask else None
+        ids = await idmask.read(MAX_FRAME_BYTES + 1) if idmask else None
         if ids and len(ids) > MAX_FRAME_BYTES:
             raise HTTPException(413, "id mask larger than 4 MB")
         w, h = capture_size()
