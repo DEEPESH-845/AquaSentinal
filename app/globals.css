@@ -1,48 +1,74 @@
 @import "tailwindcss";
 
 @theme {
-  /* AquaSentinal design tokens, inherited from HydraLoom. Marine lab, not startup. */
-  --color-ground: #0b1219;
-  --color-panel: #101922;
-  --color-panel-2: #16212c;
-  --color-line: #243240;
-  --color-line-strong: #34465a;
-  --color-text: #e6edf3;
-  --color-muted: #8b98a5;
-  --color-dim: #738496; /* 4.6:1 on panel, the floor for 9 to 10 px labels */
-  --color-amber: #f2a93b;
-  --color-teal: #3db9b0;
-  --color-danger: #e5484d;
-  --color-ok: #5fbf7a;
+  /* AquaSentinal tokens: marine instrumentation, not startup. Mirrored for SVG and Three.js in lib/theme.ts. */
+  --color-ground: #080f16;
+  --color-ground-2: #0c1620;
+  --color-panel: #101d28;
+  --color-panel-2: #162633;
+  --color-line: rgb(159 190 200 / 0.13);
+  --color-line-strong: rgb(159 190 200 / 0.26);
+  --color-text: #e9f0f4;
+  --color-muted: #94a6b2;
+  /* 5:1 on panel, the floor for 9 to 10 px labels; lighter than the #627681 draft for that reason */
+  --color-dim: #7a8e9b;
+  --color-teal: #42d6c5;
+  --color-cyan: #31afc8;
+  --color-amber: #f2b45d;
+  --color-danger: #f16f70;
+  --color-ok: #59d5a0;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* motion tokens, shared with lib/animations/motion.ts */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out-cubic: cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 @layer base {
   html,
   body {
-    height: 100%;
     background-color: var(--color-ground);
     color: var(--color-text);
     font-family: var(--font-sans);
-    overflow: hidden;
+  }
+  /* Mission control is a fixed instrument; the walkthrough scrolls. Each route sets its own overflow. */
+  body {
+    min-height: 100%;
   }
   ::selection {
-    background: color-mix(in oklab, var(--color-teal) 40%, transparent);
+    background: color-mix(in oklab, var(--color-teal) 35%, transparent);
   }
   /* Keyboard focus ring in the machine colour. Mouse clicks do not show it. */
   :focus-visible {
     outline: 2px solid var(--color-teal);
     outline-offset: 2px;
   }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer utilities {
-  /* Engineering panel: flat, 1px line, no blur stack. */
+  /* Engineering panel: flat, 1px line, a faint top light, no blur stack. */
   .panel {
-    background-color: color-mix(in oklab, var(--color-panel) 92%, transparent);
+    background:
+      linear-gradient(to bottom, rgb(159 190 200 / 0.035), transparent 48px),
+      color-mix(in oklab, var(--color-panel) 94%, transparent);
     border: 1px solid var(--color-line);
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.02) inset, 0 12px 32px -18px rgb(0 0 0 / 0.7);
   }
   .label {
     font-family: var(--font-mono);
@@ -64,10 +90,26 @@
     border: 1px solid var(--color-line-strong);
     color: var(--color-text);
     background: var(--color-panel-2);
-    transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+    transition:
+      border-color 160ms var(--ease-out-quart),
+      background-color 160ms var(--ease-out-quart),
+      color 160ms var(--ease-out-quart),
+      transform 120ms var(--ease-out-quart),
+      box-shadow 160ms var(--ease-out-quart);
   }
-  .btn:hover {
+  .btn:hover:not(:disabled) {
     border-color: var(--color-teal);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-teal) 18%, transparent), 0 6px 18px -10px color-mix(in oklab, var(--color-teal) 60%, transparent);
+  }
+  /* press: a short surface compression, the physical cue of a switch */
+  .btn:active:not(:disabled) {
+    transform: translateY(1px) scale(0.985);
+  }
+  .btn svg {
+    transition: transform 200ms var(--ease-out-quart);
+  }
+  .btn:hover:not(:disabled) svg {
+    transform: translateX(1px);
   }
   .btn:disabled {
     opacity: 0.4;
@@ -76,27 +118,32 @@
   .btn-primary {
     background: var(--color-amber);
     border-color: var(--color-amber);
-    color: #1a1206;
+    color: #1d1405;
     font-weight: 600;
   }
-  .btn-primary:hover {
-    background: #f7b95a;
-    border-color: #f7b95a;
+  .btn-primary:hover:not(:disabled) {
+    background: #f6c47c;
+    border-color: #f6c47c;
+    box-shadow: 0 6px 20px -10px color-mix(in oklab, var(--color-amber) 80%, transparent);
   }
   .btn-danger {
-    background: color-mix(in oklab, var(--color-danger) 18%, var(--color-panel-2));
+    background: color-mix(in oklab, var(--color-danger) 16%, var(--color-panel-2));
     border-color: var(--color-danger);
-    color: #ffd9da;
+    color: #ffe1e1;
     font-weight: 600;
   }
-  .btn-danger:hover {
+  .btn-danger:hover:not(:disabled) {
     background: var(--color-danger);
     border-color: var(--color-danger);
     color: #fff;
+    box-shadow: 0 6px 20px -10px color-mix(in oklab, var(--color-danger) 80%, transparent);
   }
   .btn-active {
     border-color: var(--color-teal);
     color: var(--color-teal);
+  }
+  .btn-icon {
+    padding: 0.4rem;
   }
   .sim-tag {
     font-family: var(--font-mono);
@@ -112,5 +159,9 @@
   input[type="range"] {
     accent-color: var(--color-teal);
     width: 100%;
+  }
+  /* a hairline that fades at both ends, for section rules on the walkthrough */
+  .rule-fade {
+    background: linear-gradient(to right, transparent, var(--color-line-strong), transparent);
   }
 }
