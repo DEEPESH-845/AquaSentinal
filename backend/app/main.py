@@ -130,7 +130,13 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
             s.repo.close()
 
     app = FastAPI(title="AquaSentinal", version=VERSION, lifespan=lifespan)
-    app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_origins),
+        allow_origin_regex=settings.cors_origin_regex or None,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     def S(request: Request) -> Services:
         return request.app.state.s

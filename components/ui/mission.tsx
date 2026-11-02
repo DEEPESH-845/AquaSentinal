@@ -196,7 +196,7 @@ function Composer() {
             Use the example instruction
           </button>
         )}
-        {backend === "OFFLINE" && <span className="text-[11px] text-amber">Backend offline: missions need the backend (npm run dev:all).</span>}
+        {backend === "OFFLINE" && <span className="text-[11px] text-amber">Backend offline: missions need the backend. A sleeping hosted backend wakes in about a minute; this updates by itself (locally: npm run dev:all).</span>}
       </div>
     </div>
   );

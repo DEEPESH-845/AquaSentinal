@@ -39,6 +39,8 @@ class Settings:
     database_url: str = "sqlite:///./aquasentinal.db"
     data_dir: Path = Path("./data")
     cors_origins: tuple[str, ...] = ("http://localhost:3000", "http://127.0.0.1:3000")
+    # optional full-match pattern for origins that are not known in advance, such as Vercel preview deployments
+    cors_origin_regex: str = ""
     request_timeout_s: float = 30.0
     max_retries: int = 3
     sam_concurrency: int = 2
@@ -91,6 +93,7 @@ def load_settings() -> Settings:
         database_url=os.environ.get("DATABASE_URL", "sqlite:///./aquasentinal.db"),
         data_dir=Path(os.environ.get("AQUA_DATA_DIR", "./data")),
         cors_origins=origins,
+        cors_origin_regex=os.environ.get("CORS_ORIGIN_REGEX", "").strip(),
         request_timeout_s=_float("META_REQUEST_TIMEOUT_S", 30.0),
         max_retries=int(os.environ.get("META_MAX_RETRIES", "3") or 3),
     )

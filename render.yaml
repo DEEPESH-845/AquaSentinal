@@ -1,0 +1,34 @@
+# Render Blueprint for the AquaSentinal backend (FastAPI, WebSockets, OpenCV) on the free plan.
+# New > Blueprint in the Render dashboard, pick this repository, then fill in the secret values it asks for.
+# Free web services sleep after 15 idle minutes (the first request wakes them in about a minute) and their disk is
+# ephemeral: missions, frames and reports reset on every restart or redeploy. The frontend runs on Vercel.
+services:
+  - type: web
+    name: aquasentinal-backend
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - backend/**
+        - shared/**
+        - render.yaml
+        - .dockerignore
+    envVars:
+      - key: APP_MODE
+        value: SIMULATION
+      - key: AQUA_HARDWARE_ENABLE
+        value: "false"
+      # the production Vercel URL, comma-separated if there are several
+      - key: CORS_ORIGINS
+        sync: false
+      # Vercel preview deployments, e.g. https://aquasentinal-[a-z0-9-]+\.vercel\.app
+      - key: CORS_ORIGIN_REGEX
+        sync: false
+      # optional: leave empty for labelled offline mode
+      - key: MODEL_API_KEY
+        sync: false

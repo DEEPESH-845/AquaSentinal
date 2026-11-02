@@ -54,6 +54,10 @@ The backend reads its configuration from the process environment only; no `.env`
 Export the variables listed in `.env.example` in the shell that starts the backend, or prefix the command, for example `MODEL_API_KEY=... npm run dev:all`.
 Without `MODEL_API_KEY` everything runs in labelled offline mode.
 
+## Deploy it
+
+Free hosting: frontend on Vercel, backend on Render (Docker, WebSockets). `render.yaml` and `vercel.json` hold the configuration; [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the steps, the environment variables (`NEXT_PUBLIC_BACKEND_URL` on Vercel; `CORS_ORIGINS`, optional `CORS_ORIGIN_REGEX` and `MODEL_API_KEY` on Render) and what the free tier means for a demo.
+
 ## Explore it
 
 - http://localhost:3000/walkthrough is a scroll-driven explanation of the product over the live twin: the problem, the rig, the model pipeline, perception, adaptive control and a measured result.
@@ -121,5 +125,6 @@ docs/                Audit, migration map, architecture, integration, safety, te
 - [Impact and market](docs/IMPACT_AND_MARKET.md)
 - [Judging readiness](docs/JUDGING_READINESS.md)
 - [Final demo script](docs/FINAL_DEMO_SCRIPT.md), [shot list](docs/DEMO_SHOT_LIST.md), [validation checklist](docs/DEMO_VALIDATION_CHECKLIST.md)
+- [Deployment](docs/DEPLOYMENT.md)
 - [Final product audit](docs/FINAL_PRODUCT_AUDIT.md) and [UI bug audit](docs/UI_BUG_AUDIT.md)
 - [Roadmap](docs/ROADMAP.md)

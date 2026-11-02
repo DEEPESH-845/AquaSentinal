@@ -192,3 +192,18 @@ def test_websockets_events_commands_and_invalid_messages(client):
     with client.websocket_connect("/ws/telemetry") as ws:
         t = ws.receive_json()
         assert t["type"] == "telemetry" and t["data"]["gantry"]["estop"] is True
+
+
+def test_cors_allows_listed_origins_and_the_preview_pattern_only(settings):
+    from dataclasses import replace
+
+    app = create_app(replace(settings, cors_origins=("https://aquasentinal.vercel.app",), cors_origin_regex=r"https://aquasentinal-[a-z0-9-]+\.vercel\.app"))
+    with TestClient(app) as c:
+        def allowed(origin: str) -> str | None:
+            r = c.options("/api/health", headers={"Origin": origin, "Access-Control-Request-Method": "GET"})
+            return r.headers.get("access-control-allow-origin")
+
+        assert allowed("https://aquasentinal.vercel.app") == "https://aquasentinal.vercel.app"
+        assert allowed("https://aquasentinal-git-main-team.vercel.app") == "https://aquasentinal-git-main-team.vercel.app"
+        assert allowed("https://evil.example.com") is None
+        assert allowed("https://aquasentinal.vercel.app.evil.com") is None
