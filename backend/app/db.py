@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS model_executions (
   id TEXT PRIMARY KEY, created_at REAL NOT NULL, model TEXT NOT NULL, classification TEXT NOT NULL, record TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS exe_created ON model_executions(created_at);
+CREATE INDEX IF NOT EXISTS exe_class ON model_executions(classification);
+CREATE TABLE IF NOT EXISTS meta_cache (
+  key TEXT PRIMARY KEY, model TEXT, execution_id TEXT, response TEXT, created_at REAL
+);
 """
 
 
@@ -185,6 +189,24 @@ class Repository:
 
     def execution_counts(self) -> dict[str, int]:
         return {r["classification"]: r["n"] for r in self._all("SELECT classification, COUNT(*) AS n FROM model_executions GROUP BY classification")}
+
+    def spent_usd(self) -> float:
+        """Money actually spent: the cost of every LIVE_META execution. Mocked, cached and failed requests cost nothing."""
+        rows = self._all("SELECT COALESCE(SUM(json_extract(record, '$.costUsd')), 0) AS usd FROM model_executions WHERE classification='LIVE_META'")
+        return float(rows[0]["usd"])
+
+    def cache_get(self, key: str) -> dict[str, Any] | None:
+        """A stored successful response with the execution record it came from (None if that record was never saved)."""
+        rows = self._all(
+            "SELECT c.response, c.execution_id, e.record FROM meta_cache c LEFT JOIN model_executions e ON e.id = c.execution_id WHERE c.key=?", (key,)
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        return {"response": json.loads(r["response"]), "executionId": r["execution_id"], "execution": json.loads(r["record"]) if r["record"] else None}
+
+    def cache_put(self, key: str, model: str, execution_id: str, response: Any) -> None:
+        self._exec("INSERT OR REPLACE INTO meta_cache(key, model, execution_id, response, created_at) VALUES (?,?,?,?,?)", (key, model, execution_id, json.dumps(response), time.time()))
 
     def get_summary(self, mission_id: str) -> dict[str, Any] | None:
         rows = self._all("SELECT record FROM summaries WHERE mission_id=?", (mission_id,))

@@ -32,3 +32,9 @@ services:
       # optional: leave empty for labelled offline mode
       - key: MODEL_API_KEY
         sync: false
+      # cap in USD on live Meta spend. The free plan's disk is ephemeral, so the tally restarts with the service
+      - key: AQUA_META_BUDGET_USD
+        value: "1.00"
+      # optional: when set, Meta-calling routes need header X-Aqua-Passcode with this value (otherwise labelled LIVE LOCKED)
+      - key: AQUA_LIVE_PASSCODE
+        sync: false

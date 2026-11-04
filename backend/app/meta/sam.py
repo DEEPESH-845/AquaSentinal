@@ -64,7 +64,6 @@ class Sam:
             op="segmentation",
             input_ref=f"{ref} prompt={prompt!r}".strip(),
         )
-        self.client.usage.get(self.model).images += 1
         try:
             return parse_sam_output(text, width, height, complete=not final.get("_incomplete")), latency
         except Exception as e:  # a malformed payload is the provider's failure, not a crash

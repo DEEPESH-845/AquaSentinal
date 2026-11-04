@@ -14,10 +14,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from .config import Settings, load_settings
 from .db import Repository
@@ -27,6 +27,7 @@ from .hardware.camera import CameraManager
 from .hardware.drivers import DriverFault, SerialGantryDriver, SimulatedGantryDriver, open_serial
 from .hardware.motion import InterlockError, MotionController
 from .meta.client import MetaAPIError, MetaClient
+from .meta.governor import Governor, LiveLocked, client_ip, live_access
 from .meta.sam import Sam
 from .meta.spark import Spark
 from .meta.voice import Voice
@@ -53,11 +54,16 @@ MAX_FRAME_BYTES = 4 * 1024 * 1024
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
+class UnlockBody(BaseModel):
+    passcode: str = Field("", max_length=256)
+
+
 @dataclass
 class Services:
     settings: Settings
     repo: Repository
     events: EventBus
+    governor: Governor
     meta: MetaClient | None
     spark: Spark | None
     sam: Sam | None
@@ -73,11 +79,12 @@ class Services:
 def build_services(settings: Settings, meta_transport=None, serial_factory=None) -> Services:
     repo = Repository(settings.sqlite_path, settings.data_dir)
     events = EventBus()
+    governor = Governor(repo, settings.meta_budget_usd, settings.live_passcode)
     meta = spark = sam = voice = None
     if settings.meta_available:
         meta = MetaClient(
             settings.model_api_key, settings.meta_base_url, timeout_s=settings.request_timeout_s, max_retries=settings.max_retries,
-            transport=meta_transport, on_execution=repo.save_execution,
+            transport=meta_transport, on_execution=repo.save_execution, governor=governor,
         )
         spark, sam, voice = Spark(meta, settings.spark_model), Sam(meta, settings.sam_model), Voice(meta, settings.voice_model)
     hardware = settings.app_mode == "HARDWARE" and settings.hardware_enable and bool(settings.serial_port or serial_factory)
@@ -88,13 +95,13 @@ def build_services(settings: Settings, meta_transport=None, serial_factory=None)
         driver = sim_driver = SimulatedGantryDriver()
     motion = MotionController(driver, events, hardware=hardware)
     camera = CameraManager(settings.camera_device if settings.app_mode == "HARDWARE" else "")
-    pipeline = PerceptionPipeline(settings, repo, events, spark, sam)
+    pipeline = PerceptionPipeline(settings, repo, events, spark, sam, governor)
 
     async def hw_status() -> dict:
         return motion.snapshot()
 
     missions = MissionService(repo, events, spark, pipeline, hw_status)
-    return Services(settings, repo, events, meta, spark, sam, voice, pipeline, motion, camera, missions, sim_driver, time.time())
+    return Services(settings, repo, events, governor, meta, spark, sam, voice, pipeline, motion, camera, missions, sim_driver, time.time())
 
 
 def create_app(settings: Settings | None = None, *, meta_transport=None, serial_factory=None) -> FastAPI:
@@ -152,6 +159,10 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         status = e.status if 400 <= e.status < 600 else 502
         return JSONResponse({"error": str(e), "detail": e.public()}, status_code=status)
 
+    @app.exception_handler(LiveLocked)
+    async def _live_locked(_: Request, __: LiveLocked):
+        return JSONResponse({"error": "live mode locked"}, status_code=403)
+
     @app.exception_handler(InterlockError)
     async def _interlock(_: Request, e: InterlockError):
         return JSONResponse({"error": str(e), "interlock": True}, status_code=409)
@@ -163,30 +174,40 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         s = S(request)
         return {"status": "ok", "version": VERSION, "db": s.repo.ping(), "uptimeS": round(time.time() - s.started_at, 1)}
 
-    def providers(s: Services) -> dict[str, Any]:
-        live = "LIVE" if s.meta else "OFFLINE"
+    def providers(s: Services, unlocked: bool) -> dict[str, Any]:
+        live = "OFFLINE" if not s.meta else "LIVE" if unlocked else "LIVE_LOCKED"
         return {
-            "spark": {"status": live, "model": settings.spark_model, "fallback": None if s.meta else "OFFLINE_RULE_PARSER"},
-            "sam": {"status": live, "model": settings.sam_model, "fallback": None if s.meta else "SIM_DETECTOR + OFFLINE_FIXTURE masks"},
-            "voice": {"status": live, "model": settings.voice_model, "fallback": None if s.meta else "text input"},
+            "spark": {"status": live, "model": settings.spark_model, "fallback": None if live == "LIVE" else "OFFLINE_RULE_PARSER"},
+            "sam": {"status": live, "model": settings.sam_model, "fallback": None if live == "LIVE" else "SIM_DETECTOR + OFFLINE_FIXTURE masks"},
+            "voice": {"status": live, "model": settings.voice_model, "fallback": None if live == "LIVE" else "text input"},
         }
 
     @app.get("/api/system/status")
-    async def system_status(request: Request):
+    async def system_status(request: Request, live: bool = Depends(live_access)):
         s = S(request)
         return {
             "version": VERSION,
             "mode": settings.app_mode,
             "hardwareEnabled": settings.hardware_enable,
             "hardwareActive": s.motion.hardware,
-            "providers": providers(s),
+            "providers": providers(s, live),
             "usage": s.meta.usage.snapshot() if s.meta else {},
+            "credits": s.governor.credits(),
+            "live": {"lockEnabled": s.governor.lock_enabled, "unlocked": live},
             "inference": {"active": s.pipeline.queue.active, "concurrency": settings.sam_concurrency},
             "gantry": s.motion.snapshot(),
             "camera": s.camera.status(),
             "db": s.repo.ping(),
             "eventSubscribers": s.events.subscribers,
         }
+
+    @app.post("/api/system/unlock")
+    async def unlock(request: Request, body: UnlockBody):
+        """Checks a passcode so the browser can tell the operator whether it will work. The browser then sends it as X-Aqua-Passcode."""
+        unlocked, limited = S(request).governor.unlock(body.passcode, client_ip(request))
+        if limited:
+            return JSONResponse({"error": "too many passcode attempts; try again in a minute", "unlocked": False}, status_code=429, headers={"Retry-After": "60"})
+        return {"unlocked": unlocked}
 
     @app.get("/api/system/config")
     async def system_config():
@@ -229,8 +250,10 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
     # ------------------------------------------------------------ voice and AI
 
     @app.post("/api/voice/transcribe", response_model=TranscriptResult)
-    async def transcribe(request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource")):
+    async def transcribe(request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource"), live: bool = Depends(live_access)):
         s = S(request)
+        if not live:
+            raise LiveLocked()
         if input_source not in ("LIVE_MICROPHONE", "RECORDED_INPUT"):
             raise HTTPException(422, "inputSource must be LIVE_MICROPHONE or RECORDED_INPUT")
         if s.voice is None:
@@ -245,14 +268,16 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         )
 
     @app.post("/api/ai/interpret", response_model=InterpretResponse)
-    async def interpret(request: Request, body: InterpretRequest, offline: bool = Query(False, description="force the labelled offline parser")):
+    async def interpret(request: Request, body: InterpretRequest, offline: bool = Query(False, description="force the labelled offline parser"), live: bool = Depends(live_access)):
         s = S(request)
-        mission, model = await s.missions.interpret(body, force_offline=offline)
+        mission, model = await s.missions.interpret(body, force_offline=offline, live=live)
         return InterpretResponse(mission=mission, provider=mission.provider, model=model)
 
     @app.post("/api/ai/segment")
-    async def segment(request: Request, body: SegmentRequest):
+    async def segment(request: Request, body: SegmentRequest, live: bool = Depends(live_access)):
         s = S(request)
+        if not live:
+            raise LiveLocked()
         cap = s.repo.get_capture(body.capture_id)
         if cap is None:
             raise HTTPException(404, "capture not found")
@@ -307,13 +332,13 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         app.post(f"/api/missions/{{mission_id}}/{action}", name=f"mission_{action}")(handler)
 
     @app.post("/api/missions/{mission_id}/complete")
-    async def complete(request: Request, mission_id: str, result: TwinMissionResult):
-        return (await S(request).missions.complete(mission_id, result)).model_dump(by_alias=True)
+    async def complete(request: Request, mission_id: str, result: TwinMissionResult, live: bool = Depends(live_access)):
+        return (await S(request).missions.complete(mission_id, result, live)).model_dump(by_alias=True)
 
     # ------------------------------------------------------------ inspection
 
     @app.post("/api/inspection/capture")
-    async def capture(request: Request, meta: str = Form(...), frame: UploadFile = File(...), idmask: UploadFile | None = File(None)):
+    async def capture(request: Request, meta: str = Form(...), frame: UploadFile = File(...), idmask: UploadFile | None = File(None), live: bool = Depends(live_access)):
         s = S(request)
         try:
             m = CaptureMeta.model_validate_json(meta)
@@ -328,7 +353,7 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         w, h = capture_size()
         s.camera.push(jpeg, w, h)
         try:
-            result = await s.pipeline.process(m, jpeg, ids)
+            result = await s.pipeline.process(m, jpeg, ids, live)
         except ValueError as e:
             raise HTTPException(422, str(e))
         return result.model_dump(by_alias=True)
@@ -389,8 +414,8 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         return r
 
     @app.post("/api/inspection/{mission_id}/summary")
-    async def regenerate_summary(request: Request, mission_id: str):
-        return await S(request).missions.summarize(mission_id)
+    async def regenerate_summary(request: Request, mission_id: str, live: bool = Depends(live_access)):
+        return await S(request).missions.summarize(mission_id, live)
 
     # ------------------------------------------------------------ gantry and telemetry
 

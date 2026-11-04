@@ -171,7 +171,7 @@ def main() -> None:
     base = load_settings()
     cases = json.loads((EVAL / "instructions.json").read_text())["cases"]
     with tempfile.TemporaryDirectory() as tmp:
-        settings = replace(base, database_url=f"sqlite:///{tmp}/eval.db", data_dir=Path(tmp) / "data", app_mode="SIMULATION", hardware_enable=False)
+        settings = replace(base, database_url=f"sqlite:///{tmp}/eval.db", data_dir=Path(tmp) / "data", app_mode="SIMULATION", hardware_enable=False, live_passcode="")
         with TestClient(create_app(settings)) as c:
             live = settings.meta_available
             not_run = {"classification": "NOT_RUN", "reason": "MODEL_API_KEY not set"}

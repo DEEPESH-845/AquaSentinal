@@ -79,9 +79,10 @@ class MissionService:
         await self.events.publish("mission.planned", {"missionId": m.id, "provider": provider, "planSummary": summary.model_dump(by_alias=True)})
         return m
 
-    async def interpret(self, req: InterpretRequest, force_offline: bool = False) -> tuple[MissionRecord, str | None]:
+    async def interpret(self, req: InterpretRequest, force_offline: bool = False, live: bool = True) -> tuple[MissionRecord, str | None]:
+        """live=False is a locked request: the labelled offline parser answers, as when no key is set."""
         ctx = req.context
-        if self.spark is not None and not force_offline:
+        if self.spark is not None and live and not force_offline:
             return await self._interpret_spark(req.instruction, ctx), self.spark.model
         spec, notes = parse_instruction(req.instruction)
         spec = spec.model_copy(update={"mission_id": self._unique_id(spec.mission_id)})
@@ -89,7 +90,8 @@ class MissionService:
             name="create_inspection_mission", arguments=spec.model_dump(by_alias=True, exclude={"mission_id"}), ok=True,
             result={"missionId": spec.mission_id}, phase="PLANNING", by="OFFLINE_RULE_PARSER", at=time.time(),
         )
-        warnings = ["Interpreted by the offline keyword parser, not by Muse Spark: set MODEL_API_KEY for language understanding.", *notes]
+        why = "live mode is locked" if self.spark is not None and not live else "set MODEL_API_KEY for language understanding"
+        warnings = [f"Interpreted by the offline keyword parser, not by Muse Spark: {why}.", *notes]
         explanation = "Keyword rules mapped the instruction to the fields below. Review them before approving."
         return await self._store(req.instruction, "OFFLINE_RULE_PARSER", spec, explanation, [record], warnings), None
 
@@ -168,7 +170,7 @@ class MissionService:
         await self.events.publish("mission.status", {"missionId": m.id, "status": to})
         return m
 
-    async def complete(self, mission_id: str, result: TwinMissionResult) -> MissionRecord:
+    async def complete(self, mission_id: str, result: TwinMissionResult, live: bool = True) -> MissionRecord:
         m = self.get(mission_id)
         if m.status in ("COMPLETED", "ABORTED", "FAILED"):
             raise MissionError(409, f"mission {m.id} already finished as {m.status}")
@@ -180,19 +182,19 @@ class MissionService:
             self.pipeline.cancel(m.id)
         self.repo.save_mission(m)
         await self.events.publish("mission.status", {"missionId": m.id, "status": m.status, "outcome": result.outcome})
-        task = asyncio.create_task(self.summarize(m.id))
+        task = asyncio.create_task(self.summarize(m.id, live))
         self._summaries.add(task)
         task.add_done_callback(self._summaries.discard)
         return m
 
-    async def summarize(self, mission_id: str) -> dict[str, Any]:
+    async def summarize(self, mission_id: str, live: bool = True) -> dict[str, Any]:
         """Muse Spark summary from the stored records, or the labelled template when the model is unavailable or fails."""
         await asyncio.sleep(0.5)  # let the last capture finish processing
         report = build_report(self.repo, mission_id)
         if report is None:
             raise MissionError(404, "mission not found")
         summary: dict[str, Any]
-        if self.spark is not None:
+        if self.spark is not None and live:
             try:
                 data, latency = await self.spark.summarize({k: report[k] for k in ("mission", "outcome", "assets", "anomalyCandidates", "uninspectedAreas", "segmentation", "path", "disclaimers")}, ref=f"mission:{mission_id}")
                 summary = {

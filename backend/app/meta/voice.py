@@ -51,5 +51,4 @@ class Voice:
             op="transcription",
             input_ref=f"{ref} wav={seconds:.1f}s".strip(),
         )
-        self.client.usage.get(self.model).audio_ms += int(body.get("audioDurationMs") or 0)
         return body, latency
