@@ -56,6 +56,8 @@ Without `MODEL_API_KEY` everything runs in labelled offline mode.
 
 ## Deploy it
 
+Live: https://aquasentinal-meta.vercel.app (backend https://aquasentinal-backend.onrender.com; it sleeps when idle, so give it a minute to wake).
+
 Free hosting: frontend on Vercel, backend on Render (Docker, WebSockets). `render.yaml` and `vercel.json` hold the configuration; [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the steps, the environment variables (`NEXT_PUBLIC_BACKEND_URL` on Vercel; `CORS_ORIGINS`, optional `CORS_ORIGIN_REGEX` and `MODEL_API_KEY` on Render) and what the free tier means for a demo.
 
 ## Explore it

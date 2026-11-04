@@ -2,6 +2,11 @@
 
 Recommended free setup: the Next.js frontend on **Vercel** and the FastAPI backend on **Render** (free web service, Docker).
 
+Live deployment (2026-11-04):
+
+- Frontend: https://aquasentinal-meta.vercel.app (Vercel project `aquasentinal`; `aquasentinal.vercel.app` and `aquasentinal-app.vercel.app` belong to other accounts).
+- Backend: https://aquasentinal-backend.onrender.com (health: `/api/health`).
+
 ## Why two hosts
 
 The frontend is a static Next.js build (both routes prerender), which is exactly what Vercel's free Hobby plan serves best.
@@ -35,8 +40,10 @@ Free tiers change often; the comparison above was checked in November 2026.
 1. Push the repository to GitHub.
 2. In the Render dashboard choose New, then Blueprint, and select the repository. Render reads `render.yaml` and creates `aquasentinal-backend` on the free plan from `backend/Dockerfile` (build context: the repository root; `.dockerignore` sends only `backend/` and `shared/`).
 3. Fill in the values the blueprint asks for:
-   - `CORS_ORIGINS`: the production frontend URL, for example `https://aquasentinal.vercel.app` (comma-separated if there are several).
-   - `CORS_ORIGIN_REGEX`: optional, for Vercel preview deployments, for example `https://aquasentinal-[a-z0-9-]+\.vercel\.app` (a full match is required, so look-alike domains are refused).
+   - `CORS_ORIGINS`: the production frontend URL, for example `https://aquasentinal-meta.vercel.app` (comma-separated if there are several).
+   - `CORS_ORIGIN_REGEX`: optional, for Vercel preview deployments, for example `https://aquasentinal-[a-z0-9-]+-deepeshs-projects-b1b35077\.vercel\.app`.
+     A full match is required, so look-alike domains are refused.
+     Keep your Vercel team slug at the end: preview URLs always end with it, while a looser `aquasentinal-[a-z0-9-]+\.vercel\.app` also matches other people's projects such as `aquasentinal-app.vercel.app`.
    - `MODEL_API_KEY`: optional; leave empty for labelled offline mode. It stays on the server and is never sent to the browser.
 4. Wait for the deploy, then check `https://<service>.onrender.com/api/health` returns `{"status":"ok",...}`.
 
@@ -56,11 +63,24 @@ Hardware stays disabled (`APP_MODE=SIMULATION`, `AQUA_HARDWARE_ENABLE=false`).
 With the CLI instead of the dashboard:
 
 ```bash
-npx vercel link
+npx vercel project add aquasentinal
+npx vercel link --yes --project aquasentinal
 npx vercel env add NEXT_PUBLIC_BACKEND_URL production   # paste the Render URL
 npx vercel env add NEXT_PUBLIC_BACKEND_URL preview
 npx vercel --prod
 ```
+
+Create the project before linking.
+A plain `vercel link --yes` on a new project sees `render.yaml` and the backend, offers a multi-service setup, and fails because `vercel.json` has top-level build settings (Vercel CLI 59).
+
+`vercel deploy` uploads the working directory, which includes the gitignored `backend/.venv` and `.env.local`.
+Deploy from Git, or from a clean export of the committed tree:
+
+```bash
+D=$(mktemp -d) && git archive main | tar -x -C "$D" && cp -R .vercel "$D/" && (cd "$D" && npx vercel --prod)
+```
+
+If the production URL is not the one you wanted (the `<project>.vercel.app` name is taken), add a free one with `npx vercel domains add <name>.vercel.app aquasentinal`.
 
 ## Caveats
 
