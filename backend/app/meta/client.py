@@ -278,15 +278,15 @@ class MetaClient:
             {
                 "id": f"exe_{uuid.uuid4().hex[:12]}", "model": ticket.model, "operation": op, "inputRef": input_ref, "requestAt": _now_iso(),
                 "transport": orig.get("transport", self.transport_kind), "endpoint": orig.get("endpoint", self.base_url), "attempts": 0, "success": True,
-                "status": orig.get("status"), "error": None, "traceId": orig.get("traceId"), "outputRef": orig.get("outputRef"), "durationMs": 0.0,
+                "status": orig.get("status"), "error": None, "traceId": orig.get("traceId"), "outputRef": orig.get("outputRef"), "durationMs": None,
                 "costUsd": 0.0, "cachedFrom": ticket.hit["executionId"], "classification": ticket.classification,
             }
         )
         return ticket.hit["response"]
 
-    async def chat(self, payload: dict[str, Any], *, timeout_s: float | None = None, op: str = "chat", input_ref: str = "") -> tuple[dict[str, Any], float]:
-        """POST /chat/completions. Returns the body and latency; token usage is recorded."""
-        return await self._governed("chat", payload["model"], payload, op, input_ref, lambda: self._chat(payload, timeout_s, op, input_ref), lambda body: (body, 0.0))
+    async def chat(self, payload: dict[str, Any], *, timeout_s: float | None = None, op: str = "chat", input_ref: str = "") -> tuple[dict[str, Any], float | None]:
+        """POST /chat/completions. Returns the body and latency (None for a cached answer: nothing was measured); token usage is recorded."""
+        return await self._governed("chat", payload["model"], payload, op, input_ref, lambda: self._chat(payload, timeout_s, op, input_ref), lambda body: (body, None))
 
     async def _chat(self, payload: dict[str, Any], timeout_s: float | None, op: str, input_ref: str) -> tuple[tuple[dict[str, Any], float], dict[str, Any], dict[str, Any]]:
         model = payload["model"]
@@ -309,10 +309,10 @@ class MetaClient:
 
     async def responses_stream_text(
         self, payload: dict[str, Any], *, timeout_s: float | None = None, op: str = "responses", input_ref: str = ""
-    ) -> tuple[str, dict[str, Any], float]:
-        """POST /responses with stream=true and accumulate the output_text lane. Returns (text, final response, latency)."""
+    ) -> tuple[str, dict[str, Any], float | None]:
+        """POST /responses with stream=true and accumulate the output_text lane. Returns (text, final response, latency); latency is None for a cached answer."""
         return await self._governed(
-            "responses", payload["model"], payload, op, input_ref, lambda: self._responses(payload, timeout_s, op, input_ref), lambda c: (c["text"], c["final"], 0.0)
+            "responses", payload["model"], payload, op, input_ref, lambda: self._responses(payload, timeout_s, op, input_ref), lambda c: (c["text"], c["final"], None)
         )
 
     async def _responses(self, payload: dict[str, Any], timeout_s: float | None, op: str, input_ref: str) -> tuple[tuple[str, dict[str, Any], float], dict[str, Any] | None, dict[str, Any]]:
@@ -373,9 +373,9 @@ class MetaClient:
 
     async def multipart(
         self, path: str, model: str, files: dict[str, tuple[str | None, bytes | str, str]], *, timeout_s: float | None = None, op: str = "multipart", input_ref: str = ""
-    ) -> tuple[dict[str, Any], float]:
+    ) -> tuple[dict[str, Any], float | None]:
         return await self._governed(
-            "multipart", model, {"path": path, "files": files}, op, input_ref, lambda: self._multipart(path, model, files, timeout_s, op, input_ref), lambda body: (body, 0.0)
+            "multipart", model, {"path": path, "files": files}, op, input_ref, lambda: self._multipart(path, model, files, timeout_s, op, input_ref), lambda body: (body, None)
         )
 
     async def _multipart(

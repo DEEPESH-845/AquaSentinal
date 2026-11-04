@@ -28,7 +28,7 @@ export interface CaptureView {
 interface VoiceState {
   state: "IDLE" | "RECORDING" | "TRANSCRIBING" | "ERROR";
   error?: string;
-  latencyMs?: number;
+  latencyMs?: number | null;
   durationMs?: number;
 }
 

@@ -362,7 +362,7 @@ class TranscriptResult(Wire):
     model: str
     session_id: str
     audio_duration_ms: int
-    latency_ms: float
+    latency_ms: float | None  # None when the transcript came from the response cache
 
 
 # ---------------------------------------------------------------- commands over /ws/commands and /api/gantry

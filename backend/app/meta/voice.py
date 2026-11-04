@@ -41,7 +41,7 @@ class Voice:
         self.client = client
         self.model = model
 
-    async def transcribe(self, wav: bytes, ref: str = "") -> tuple[dict, float]:
+    async def transcribe(self, wav: bytes, ref: str = "") -> tuple[dict, float | None]:
         seconds = validate_wav(wav)
         request = {"model": self.model, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK", "keywords": KEYWORDS, "languageBias": ["English"]}
         body, latency = await self.client.multipart(

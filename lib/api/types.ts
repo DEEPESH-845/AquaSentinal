@@ -159,7 +159,8 @@ export interface TranscriptResult {
   model: string;
   sessionId: string;
   audioDurationMs: number;
-  latencyMs: number;
+  /** null when the transcript was replayed from the backend's response cache: nothing was measured. */
+  latencyMs: number | null;
 }
 
 /** Where the audio came from. RECORDED_INPUT is a prepared file, never presented as a live microphone. */

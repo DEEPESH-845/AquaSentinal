@@ -127,11 +127,12 @@ async def test_cache_hit_replays_identical_payload_as_cached_live_with_no_transp
     client, gov = governed(repo, FakeNetwork(meta.transport))
     first, _ = await client.chat(CHAT, op="ask")
     second, latency = await client.chat(CHAT, op="ask")
-    assert second == first and latency == 0.0
+    assert second == first and latency is None, "nothing was measured, so there is no latency to report"
     assert len(meta.requests) == 1, "the second call never reached the transport"
     [original] = [x for x in repo.executions() if x["classification"] == "LIVE_META"]
     [hit] = [x for x in repo.executions() if x["classification"] == "CACHED_LIVE"]
     assert hit["costUsd"] == 0 and hit["cachedFrom"] == original["id"] and hit["success"] and hit["operation"] == "ask"
+    assert hit["durationMs"] is None and original["durationMs"] is not None
     assert hit["traceId"] == original["traceId"] and hit["outputRef"] == original["outputRef"]
     c = gov.credits()
     assert c["liveCalls"] == 1 and c["cachedCalls"] == 1 and c["saved"]["byReason"]["cache_hit"] == 1
@@ -270,6 +271,7 @@ def test_cascade_skips_duplicates_unusable_frames_and_non_candidates_and_counts_
 
         r7 = post(c, capture_form(mid, 6, 70), FRAME_A).json()  # same frame and prompt as r1 from elsewhere: the cache answers
         assert r7["segmentations"][0]["status"] == "EMPTY" and len(meta.requests) == 3, "served from the response cache"
+        assert r7["segmentations"][0]["latencyMs"] is None and r1["segmentations"][0]["latencyMs"] is not None, "a replayed answer has no latency"
 
         credits = c.get("/api/system/status").json()["credits"]
         assert credits["saved"] == {"total": 4, "byReason": {"duplicate": 1, "unusable_quality": 1, "not_candidate": 1, "cache_hit": 1, "budget": 0}}
@@ -302,6 +304,7 @@ def test_status_shape_spend_and_a_cache_that_survives_a_restart(live_settings, m
         first = c.post("/api/voice/transcribe", files=wav).json()
         again = c.post("/api/voice/transcribe", files=wav).json()
         assert again["transcript"] == first["transcript"] == "scan the pipe" and len(meta.requests) == 1
+        assert first["latencyMs"] is not None and again["latencyMs"] is None
         after = c.get("/api/system/status").json()["credits"]
         assert after["liveCalls"] == 1 and after["cachedCalls"] == 1 and after["saved"]["byReason"]["cache_hit"] == 1
         assert after["spentUsd"] == pytest.approx(4.2 / 3600 * 0.18, abs=1e-6) and after["remainingUsd"] == pytest.approx(1.0 - after["spentUsd"], abs=1e-6)
@@ -353,14 +356,71 @@ def test_meta_routes_need_the_passcode_when_one_is_set(locked, meta):
         assert c.post("/api/ai/segment", json={"captureId": seg["captureId"], "prompt": "cable"}).status_code == 403
 
 
-def test_unlock_endpoint_checks_the_passcode_and_limits_attempts(locked):
+SUMMARY = {"summary": "One loose cable candidate.", "key_findings": ["cable"], "limitations": [], "recommended_followups": ["verify"]}
+
+
+def test_a_locked_summary_says_so_instead_of_silently_using_the_template(locked, meta):
+    meta.add("/chat/completions", chat_json(SUMMARY))
+    ok = {"X-Aqua-Passcode": PASSCODE}
+    with TestClient(create_app(locked, meta_transport=meta.transport)) as c:
+        mid = c.post("/api/ai/interpret?offline=true", json={"instruction": "inspect cables only"}).json()["mission"]["id"]
+        summary = c.post(f"/api/inspection/{mid}/summary").json()
+        assert summary["provider"] == "TEMPLATE_FROM_RECORDS" and summary["error"].startswith("live mode locked")
+        assert all("MODEL_API_KEY" not in x for x in summary["limitations"]), "the reason given is the lock, not a missing key"
+        assert c.get(f"/api/inspection/{mid}/report").json()["summary"]["error"].startswith("live mode locked"), "the stored report carries the label"
+        assert meta.requests == []
+        unlocked = c.post(f"/api/inspection/{mid}/summary", headers=ok).json()
+        assert unlocked["provider"] == "MUSE_SPARK" and "error" not in unlocked and unlocked["latencyMs"] is not None and len(meta.requests) == 1
+        replayed = c.post(f"/api/inspection/{mid}/summary", headers=ok).json()
+        assert replayed["provider"] == "MUSE_SPARK" and replayed["latencyMs"] is None and len(meta.requests) == 1, "a cached summary has no latency"
+
+
+def test_the_pipeline_cannot_be_built_without_the_shared_governor(live_settings, repo):
+    from app.events import EventBus
+    from app.perception.pipeline import PerceptionPipeline
+
+    with pytest.raises(TypeError):
+        PerceptionPipeline(live_settings, repo, EventBus(), None, None)  # type: ignore[call-arg]
+
+
+def test_unlock_endpoint_checks_the_passcode_and_limits_failed_attempts(locked):
     with TestClient(create_app(locked)) as c:
-        assert c.post("/api/system/unlock", json={"passcode": PASSCODE}).json() == {"unlocked": True}
-        assert c.post("/api/system/unlock", json={"passcode": "nope"}).json() == {"unlocked": False}
-        for _ in range(8):
-            assert c.post("/api/system/unlock", json={"passcode": "nope"}).status_code == 200
-        r = c.post("/api/system/unlock", json={"passcode": PASSCODE})  # the 11th attempt in the minute, even a right one
+        for _ in range(40):  # a correct passcode never uses up the allowance
+            assert c.post("/api/system/unlock", json={"passcode": PASSCODE}).json() == {"unlocked": True}
+            assert c.get("/api/system/status", headers={"X-Aqua-Passcode": PASSCODE}).json()["live"]["unlocked"] is True
+        for _ in range(10):
+            r = c.post("/api/system/unlock", json={"passcode": "nope"})
+            assert r.status_code == 200 and r.json() == {"unlocked": False}
+        r = c.post("/api/system/unlock", json={"passcode": PASSCODE})  # ten failures in the minute: even a right one waits
         assert r.status_code == 429 and r.json()["unlocked"] is False and r.headers["retry-after"] == "60"
+
+
+def post_unlock(c: TestClient, passcode: str, forwarded_for: str):
+    return c.post("/api/system/unlock", json={"passcode": passcode}, headers={"X-Forwarded-For": forwarded_for})
+
+
+def test_rotating_the_leftmost_forwarded_for_entry_does_not_evade_the_limit(locked):
+    # uvicorn trusts every proxy here and reports the leftmost entry as the client; the entry the hosting edge appended is the rightmost
+    edge = "203.0.113.7"
+    with TestClient(create_app(locked)) as c:
+        for i in range(10):
+            assert post_unlock(c, "nope", f"198.51.100.{i}, {edge}").json() == {"unlocked": False}
+        assert post_unlock(c, PASSCODE, f"192.0.2.99, {edge}").status_code == 429, "same edge address, same bucket, whatever was spoofed to its left"
+        assert post_unlock(c, PASSCODE, "192.0.2.99, 203.0.113.8").json() == {"unlocked": True}, "a different edge address is a different client"
+        assert c.get("/api/system/status", headers={"X-Forwarded-For": f"10.9.9.9, {edge}", "X-Aqua-Passcode": PASSCODE}).json()["live"]["unlocked"] is False
+
+
+def test_a_process_wide_backstop_stops_guessing_spread_over_many_addresses(locked, repo):
+    with TestClient(create_app(locked)) as c:
+        for edge in ("203.0.113.1", "203.0.113.2", "203.0.113.3"):  # three clients, ten failures each: thirty in the minute
+            for _ in range(10):
+                post_unlock(c, "nope", f"1.1.1.1, {edge}")
+        r = post_unlock(c, PASSCODE, "1.1.1.1, 203.0.113.4")  # a fresh address, still refused
+        assert r.status_code == 429
+    gov = Governor(repo, 1.0, PASSCODE)
+    for i in range(30):
+        assert gov.access("wrong", f"10.0.0.{i}") is False
+    assert gov.access(PASSCODE, "10.0.1.1") is False and gov.unlock(PASSCODE, "10.0.1.2") == (False, True)
 
 
 def test_wrong_headers_on_any_route_spend_the_same_attempt_budget(locked):

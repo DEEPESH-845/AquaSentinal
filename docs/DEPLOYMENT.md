@@ -45,6 +45,11 @@ Free tiers change often; the comparison above was checked in November 2026.
      A full match is required, so look-alike domains are refused.
      Keep your Vercel team slug at the end: preview URLs always end with it, while a looser `aquasentinal-[a-z0-9-]+\.vercel\.app` also matches other people's projects such as `aquasentinal-app.vercel.app`.
    - `MODEL_API_KEY`: optional; leave empty for labelled offline mode. It stays on the server and is never sent to the browser.
+   - `AQUA_META_BUDGET_USD`: preset to `1.00`.
+     The backend refuses a Meta request before sending it when the worst-case cost would pass this cap.
+   - `AQUA_LIVE_PASSCODE`: optional; when set, Meta-calling routes need the header `X-Aqua-Passcode` with this value, and without it they behave as if no key is set.
+     Use a long random string of at least 16 characters, for example the output of `openssl rand -hex 12`.
+     The backend limits failed guesses to 10 per minute per client address and 30 per minute across all clients, and a correct passcode never uses up that allowance.
 4. Wait for the deploy, then check `https://<service>.onrender.com/api/health` returns `{"status":"ok",...}`.
 
 The container runs as an unprivileged user, listens on Render's `$PORT`, trusts the proxy's forwarded headers, and has a health check on `/api/health`.

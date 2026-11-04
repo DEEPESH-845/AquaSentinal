@@ -59,6 +59,11 @@ FALLBACK_PHRASES: dict[str, str] = {
 MAX_PHRASES = 3
 
 
+def _ms(latency: float | None) -> float | None:
+    """A cached answer has no latency: None, never 0."""
+    return None if latency is None else round(latency, 1)
+
+
 def mask_polygons(mask: np.ndarray, epsilon: float = 1.2) -> list[list[tuple[int, int]]]:
     """Compact mask geometry for the browser: simplified outer contours, largest first, at most 4."""
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -87,9 +92,9 @@ class MissionPerceptionState:
 
 
 class PerceptionPipeline:
-    def __init__(self, settings: Settings, repo: Repository, events: EventBus, spark: Spark | None, sam: Sam | None, governor: Governor | None = None):
+    def __init__(self, settings: Settings, repo: Repository, events: EventBus, spark: Spark | None, sam: Sam | None, governor: Governor):
         self.settings = settings
-        self.gov = governor or Governor(repo, settings.meta_budget_usd, settings.live_passcode)
+        self.gov = governor  # the one governor of the process: a second would keep its own saved-calls counter
         self.repo = repo
         self.events = events
         self.spark = spark
@@ -223,7 +228,7 @@ class PerceptionPipeline:
                 if t not in named and len(phrases) < MAX_PHRASES:
                     phrases.append({"phrase": FALLBACK_PHRASES[t], "target_class": t, "rationale": "fallback phrase for an unmentioned target"})
             st.phrases, st.reasoned = phrases, True
-            return FrameReasoning(provider="MUSE_SPARK", scene_summary=str(data.get("scene_summary", ""))[:500], phrases=phrases, latency_ms=round(latency, 1))
+            return FrameReasoning(provider="MUSE_SPARK", scene_summary=str(data.get("scene_summary", ""))[:500], phrases=phrases, latency_ms=_ms(latency))
         except (MetaAPIError, BudgetExhausted, asyncio.TimeoutError) as e:
             if isinstance(e, BudgetExhausted):
                 self.gov.record_saved("budget")
@@ -250,7 +255,7 @@ class PerceptionPipeline:
             msg = str(e) or "timed out"
             return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="FAILED", latency_ms=None, error=msg[:300], instances=[])
         out = [self._instance(meta, f"{seg_id}:{inst.object_id}", prompt, target, inst, w, h, ids) for inst in instances]
-        return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="OK" if out else "EMPTY", latency_ms=round(latency, 1), error=None, instances=out)
+        return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="OK" if out else "EMPTY", latency_ms=_ms(latency), error=None, instances=out)
 
     def _instance(self, meta: CaptureMeta, iid: str, prompt: str, target: str | None, inst: SamInstance, w: int, h: int, ids: np.ndarray | None) -> SegInstance:
         x0, y0, x1, y1 = inst.box

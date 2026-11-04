@@ -18,8 +18,11 @@ Live lock
     When AQUA_LIVE_PASSCODE is set, a request may use Meta only if header X-Aqua-Passcode matches. The decision is per request,
     so it is made at the route boundary: routes declare `live: bool = Depends(live_access)` and pass the bool to the services,
     which take their no-key path when it is False. Nothing below the route reads the header. The passcode is kept only as a
-    sha256 digest, compared with hmac.compare_digest, and failed guesses are limited per client IP (10 per minute, in memory;
-    the same bucket serves POST /api/system/unlock and wrong headers on any route).
+    sha256 digest, compared with hmac.compare_digest. Only FAILED guesses are limited, so a correct passcode never uses up the
+    allowance: 10 per minute per client address plus a backstop of 30 per minute across all clients (in memory; one pair of
+    buckets serves POST /api/system/unlock and wrong headers on any route). The client address is the rightmost
+    X-Forwarded-For entry, the hop the hosting edge appended, because the leftmost entries are whatever the caller sent.
+    Behind no proxy that header is still caller-controlled, which is what the 30 per minute backstop is for.
 """
 
 from __future__ import annotations
@@ -154,13 +157,14 @@ class AttemptLimiter:
 
 
 class Governor:
-    def __init__(self, repo: Repository, budget_usd: float, passcode: str = "", *, limiter: AttemptLimiter | None = None):
+    def __init__(self, repo: Repository, budget_usd: float, passcode: str = "", *, limiter: AttemptLimiter | None = None, backstop: AttemptLimiter | None = None):
         self.repo = repo
         self.budget_usd = budget_usd
         self.__passcode = hashlib.sha256(passcode.encode()).digest() if passcode else b""
         self._reserved = 0.0
         self._saved = dict.fromkeys(SAVED_REASONS, 0)
-        self._limiter = limiter or AttemptLimiter()
+        self._limiter = limiter or AttemptLimiter()  # failed guesses per client address
+        self._backstop = backstop or AttemptLimiter(limit=30)  # failed guesses from anyone: addresses cannot be trusted to be unique
 
     def __repr__(self) -> str:  # the passcode must never appear in a repr or a traceback
         return f"Governor(budget_usd={self.budget_usd}, lock_enabled={self.lock_enabled})"
@@ -218,30 +222,43 @@ class Governor:
     def _matches(self, candidate: str) -> bool:
         return hmac.compare_digest(hashlib.sha256(candidate.encode()).digest(), self.__passcode)
 
+    def _throttled(self, ip: str) -> bool:
+        return self._limiter.blocked(ip) or self._backstop.blocked("*")
+
+    def _failed(self, ip: str) -> None:
+        self._limiter.hit(ip)
+        self._backstop.hit("*")
+
     def access(self, candidate: str | None, ip: str) -> bool:
-        """May this request use Meta? Always when no lock is set. A wrong passcode counts against the client's attempt limit."""
+        """May this request use Meta? Always when no lock is set. A wrong passcode counts as a failed attempt; a right one never does."""
         if not self.lock_enabled:
             return True
-        if self._limiter.blocked(ip):
+        if self._throttled(ip):
             return False
         if candidate is None or candidate == "":  # no header is not a guess
             return False
         if self._matches(candidate):
             return True
-        self._limiter.hit(ip)
+        self._failed(ip)
         return False
 
     def unlock(self, candidate: str, ip: str) -> tuple[bool, bool]:
-        """POST /api/system/unlock: (unlocked, rate_limited). Every attempt counts, correct or not."""
+        """POST /api/system/unlock: (unlocked, rate_limited). Same rules as access(): only failures are counted."""
         if not self.lock_enabled:
             return True, False
-        if not self._limiter.hit(ip):
+        if self._throttled(ip):
             return False, True
-        return self._matches(candidate), False
+        if self._matches(candidate):
+            return True, False
+        self._failed(ip)
+        return False, False
 
 
 def client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    """Address to rate-limit by: the rightmost X-Forwarded-For entry (appended by the hosting edge), else the socket peer.
+    request.client is not used first because uvicorn, trusting every proxy, sets it from the caller-controlled leftmost entry."""
+    hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+    return hops[-1] if hops else request.client.host if request.client else "unknown"
 
 
 async def live_access(request: Request) -> bool:

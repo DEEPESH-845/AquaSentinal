@@ -200,7 +200,7 @@ class MissionService:
                 summary = {
                     "provider": "MUSE_SPARK",
                     "model": self.spark.model,
-                    "latencyMs": round(latency, 1),
+                    "latencyMs": None if latency is None else round(latency, 1),  # None: replayed from the response cache
                     "summary": data.get("summary", ""),
                     "keyFindings": data.get("key_findings", []),
                     "limitations": data.get("limitations", []),
@@ -208,6 +208,8 @@ class MissionService:
                 }
             except MetaAPIError as e:
                 summary = {**template_summary(report), "error": f"Muse Spark summary failed: {e}"}
+        elif self.spark is not None:  # a locked request: the template answers, and says why, as interpret and capture do
+            summary = {**template_summary(report, why="live mode locked"), "error": "live mode locked: this summary was written from the records without Muse Spark"}
         else:
             summary = template_summary(report)
         self.repo.save_summary(mission_id, summary)

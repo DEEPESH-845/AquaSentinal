@@ -17,6 +17,7 @@ from app.events import EventBus
 from app.hardware.drivers import SimulatedGantryDriver
 from app.hardware.motion import MotionController
 from app.main import create_app
+from app.meta.governor import Governor
 from app.mission.executor import BackendExecutor
 from app.schemas import MissionSpec
 
@@ -187,7 +188,7 @@ async def test_backend_executor_on_the_simulated_gantry(settings):
 async def _executor_scenarios(settings, repo, driver, motion):
     from app.perception.pipeline import PerceptionPipeline
 
-    pipeline = PerceptionPipeline(settings, repo, EventBus(), None, None)
+    pipeline = PerceptionPipeline(settings, repo, EventBus(), None, None, Governor(repo, settings.meta_budget_usd))
     from app.mission.compiler import compile_plan
     from app.schemas import MissionRecord
 

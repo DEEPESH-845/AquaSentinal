@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import json
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -122,7 +121,7 @@ class Spark:
                 return PlanningOutcome(created=created, explanation=explanation or (msg.get("content") or ""), timeline=timeline, turns=turn)
         raise PlanningFailed(f"no valid mission after {max_turns} model turns", timeline)
 
-    async def analyze_frame(self, jpeg: bytes, targets: list[str], ref: str = "") -> tuple[dict[str, Any], float]:
+    async def analyze_frame(self, jpeg: bytes, targets: list[str], ref: str = "") -> tuple[dict[str, Any], float | None]:
         url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
         body, latency = await self.client.chat(
             {
@@ -144,9 +143,8 @@ class Spark:
         )
         return _json_content(body), latency
 
-    async def summarize(self, records: dict[str, Any], ref: str = "") -> tuple[dict[str, Any], float]:
-        t0 = time.perf_counter()
-        body, _ = await self.client.chat(
+    async def summarize(self, records: dict[str, Any], ref: str = "") -> tuple[dict[str, Any], float | None]:
+        body, latency = await self.client.chat(
             {
                 "model": self.model,
                 "messages": [
@@ -158,7 +156,7 @@ class Spark:
             op="report_summary",
             input_ref=ref,
         )
-        return _json_content(body), (time.perf_counter() - t0) * 1000
+        return _json_content(body), latency
 
 
 def _json_content(body: dict[str, Any]) -> dict[str, Any]:

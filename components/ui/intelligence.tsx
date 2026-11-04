@@ -97,7 +97,7 @@ function useStages(): Stage[] {
     {
       name: "Voice instruction",
       model: "Muse Voice Transcribe",
-      value: transcript ? `"${transcript.transcript.slice(0, 90)}${transcript.transcript.length > 90 ? "..." : ""}" ${transcript.latencyMs} ms` : live ? "waiting for push-to-talk or the recorded instruction" : "no key: the instruction is typed",
+      value: transcript ? `"${transcript.transcript.slice(0, 90)}${transcript.transcript.length > 90 ? "..." : ""}" ${transcript.latencyMs === null ? "cached" : `${transcript.latencyMs} ms`}` : live ? "waiting for push-to-talk or the recorded instruction" : "no key: the instruction is typed",
       exec: voiceExec,
     },
     {

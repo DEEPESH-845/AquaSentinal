@@ -264,7 +264,7 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         body, latency = await s.voice.transcribe(data, ref=f"audio:{input_source} sha1={hashlib.sha1(data).hexdigest()[:10]}")
         return TranscriptResult(
             transcript=str(body.get("transcript", "")), provider="MUSE_VOICE_TRANSCRIBE", model=settings.voice_model,
-            session_id=str(body.get("sessionId", "")), audio_duration_ms=int(body.get("audioDurationMs") or 0), latency_ms=round(latency, 1),
+            session_id=str(body.get("sessionId", "")), audio_duration_ms=int(body.get("audioDurationMs") or 0), latency_ms=None if latency is None else round(latency, 1),
         )
 
     @app.post("/api/ai/interpret", response_model=InterpretResponse)

@@ -44,7 +44,7 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 |---|---|
 | `GET /api/health` | `{status, version, db, uptimeS}` |
 | `GET /api/system/status` | Mode, hardware flags, provider status (LIVE, LIVE_LOCKED or OFFLINE plus fallback), usage and cost estimates, `credits` (`budgetUsd, spentUsd, remainingUsd, liveCalls, cachedCalls, saved: {total, byReason}`), `live` (`lockEnabled, unlocked`), inference queue, gantry snapshot, camera status |
-| `POST /api/system/unlock` | `{passcode}`; returns `{unlocked}`, 429 after 10 attempts per minute per client IP. With `AQUA_LIVE_PASSCODE` set, Meta-calling routes need header `X-Aqua-Passcode`; without it they take the offline path (transcribe and segment return 403 `{error: "live mode locked"}`). See `backend/app/meta/governor.py` |
+| `POST /api/system/unlock` | `{passcode}`; returns `{unlocked}`, 429 after 10 failed attempts per minute per client address (rightmost `X-Forwarded-For` entry) or 30 across all clients; a correct passcode is never counted. With `AQUA_LIVE_PASSCODE` set, Meta-calling routes need header `X-Aqua-Passcode`; without it they take the offline path (transcribe and segment return 403 `{error: "live mode locked"}`). See `backend/app/meta/governor.py` |
 | `GET /api/system/config` | Non-secret config: models, limits, geometry, perception thresholds |
 | `POST /api/voice/transcribe` | Multipart `audio` (WAV); returns `{transcript, provider, model, sessionId, audioDurationMs, latencyMs}`; 503 without a key |
 | `POST /api/ai/interpret?offline=` | `{instruction, context?}`; returns `{mission, provider, model}`; Spark failures return the error and tool timeline, never a substitute |
