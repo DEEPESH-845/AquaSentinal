@@ -417,6 +417,59 @@ class AskResponse(Wire):
     language: Language
 
 
+# ---------------------------------------------------------------- work orders
+
+WorkOrderPriority = Literal["P1", "P2", "P3"]
+WorkOrderEffort = Literal["S", "M", "L"]
+WorkOrderProvider = Literal["MUSE_SPARK", "OFFLINE_RULES"]
+
+
+class WorkOrderLocation(Wire):
+    """Gantry centimetres from the home corner, inside the travel (shared/geometry.json)."""
+
+    x: float = Field(ge=0, le=TRAVEL_X)
+    y: float = Field(ge=0, le=TRAVEL_Y)
+
+
+class WorkOrder(Wire):
+    """One job for a crew, resting on stored captures. Extra keys in a model's output are ignored, not trusted."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    priority: WorkOrderPriority
+    title: str = Field(min_length=1, max_length=120)
+    location: WorkOrderLocation
+    evidence: list[str] = Field(max_length=6)  # capture ids
+    action: str = Field(min_length=1, max_length=300)
+    effort: WorkOrderEffort
+    rationale: str = Field(min_length=1, max_length=400)
+
+
+class WorkOrdersRequest(Wire):
+    """Work orders for one mission, written in `language` when Muse Spark writes them."""
+
+    language: Language = "en"
+
+
+class WorkOrdersResponse(Wire):
+    orders: list[WorkOrder]
+    provider: WorkOrderProvider
+    model: str | None
+    # every Meta execution this list cost or replayed, also when a fallback produced it
+    execution_ids: list[str]
+    # how the Meta call behind a MUSE_SPARK list was made: LIVE_META, CACHED_LIVE, MOCKED ... None for an offline list
+    classification: str | None
+    # why the offline rules wrote the list instead of Muse Spark. None when Muse Spark wrote it (or there was nothing to order)
+    fallback: AskFallback | None
+    note: str
+    # capture ids the model cited that no record holds, and how many orders were dropped (unknown evidence, no evidence, invalid fields)
+    dropped_evidence: list[str]
+    dropped_orders: int
+    # the language the orders are written in: offline rules are always English
+    language: Language
+
+
 # ---------------------------------------------------------------- commands over /ws/commands and /api/gantry
 
 

@@ -33,6 +33,7 @@ from .meta.spark import Spark
 from .meta.voice import Voice
 from .mission.ask import AskService
 from .mission.service import MissionError, MissionService
+from .mission.workorders import WorkOrderService
 from .perception.pipeline import PerceptionPipeline
 from .reporting import build_report, to_markdown
 from .schemas import (
@@ -50,6 +51,8 @@ from .schemas import (
     SummaryRequest,
     TranscriptResult,
     TwinMissionResult,
+    WorkOrdersRequest,
+    WorkOrdersResponse,
 )
 
 VERSION = "1.0.0"
@@ -78,6 +81,7 @@ class Services:
     camera: CameraManager
     missions: MissionService
     asker: AskService
+    work_orders: WorkOrderService
     sim_driver: SimulatedGantryDriver | None
     started_at: float
 
@@ -107,7 +111,7 @@ def build_services(settings: Settings, meta_transport=None, serial_factory=None)
         return motion.snapshot()
 
     missions = MissionService(repo, events, spark, pipeline, hw_status)
-    return Services(settings, repo, events, governor, meta, spark, sam, voice, pipeline, motion, camera, missions, AskService(repo, spark), sim_driver, time.time())
+    return Services(settings, repo, events, governor, meta, spark, sam, voice, pipeline, motion, camera, missions, AskService(repo, spark), WorkOrderService(repo, spark), sim_driver, time.time())
 
 
 def create_app(settings: Settings | None = None, *, meta_transport=None, serial_factory=None) -> FastAPI:
@@ -430,6 +434,11 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
     async def ask(request: Request, mission_id: str, body: AskRequest, live: bool = Depends(live_access)):
         """Grounded Q&A over one mission's stored records: Muse Spark through read-only tools, else the labelled offline records query."""
         return await S(request).asker.ask(mission_id, body.question, body.language, live)
+
+    @app.post("/api/inspection/{mission_id}/work-orders", response_model=WorkOrdersResponse)
+    async def work_orders(request: Request, mission_id: str, body: WorkOrdersRequest, live: bool = Depends(live_access)):
+        """Work orders for one mission, grounded in its stored captures: Muse Spark structured output, else the labelled offline rule table."""
+        return await S(request).work_orders.generate(mission_id, body.language, live)
 
     # ------------------------------------------------------------ gantry and telemetry
 
