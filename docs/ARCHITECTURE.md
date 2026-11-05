@@ -94,8 +94,8 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 - `useMissionStore` (`lib/store/mission.ts`) holds everything that crosses the network: backend status, the mission record, captures and their results, reports, history.
 - `BackendBridge` polls status every 5 s, holds the event socket, posts finished twin missions and requests the demo plan.
 - The live-mode passcode is held by `lib/api/client.ts`: in `sessionStorage` (this tab only, never the URL or `localStorage`) with an in-memory copy for browsers that block storage, and sent as `X-Aqua-Passcode` on every API request.
-  The backend counts a wrong passcode as a failed attempt, so the client forgets it as soon as the status read shows the lock refused it, or a model route answers 403 `live mode locked`, and then stops sending it.
-  Overlapping status reads share one request so a stale passcode costs one attempt, not several.
+  The backend counts a wrong passcode header as a failed attempt on `/api/system/status` and the Meta-calling routes, so the client forgets it as soon as the status read shows the lock refused it, or a model route answers 403 `live mode locked`, and then stops sending it.
+  Overlapping status reads share one request so a stale passcode costs one attempt, not several, and only the newest read may write the status, so a slow read from before an unlock or re-lock cannot overwrite it.
   A 429 on any other route is Meta rate limiting the backend and does not touch the passcode.
 - `components/ui/credits.tsx` holds the header credit chip with its popover and the unlock dialog.
-  Every figure comes from the `credits` object of the status; below 600 px the AI chip is not drawn, so the lock is managed from the credit popover.
+  Every figure comes from the `credits` object of the status; the popover carries the lock and unlock button wherever the header draws no AI chip (locked: below 600 px, unlocked: below 999 px).
