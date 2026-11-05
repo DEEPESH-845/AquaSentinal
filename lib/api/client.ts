@@ -1,7 +1,7 @@
 /**
  * Typed client for the AquaSentinal backend. The browser never talks to Meta: every model call goes through these routes.
  */
-import type { AskResponse, CaptureResult, ExecutionLog, HistoryItem, InspectionReport, InterpretResponse, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource, WorkOrdersResponse } from "./types";
+import type { AskResponse, CaptureResult, ExecutionLog, HistoryItem, InspectionReport, InterpretResponse, Language, MissionRecord, Preflight, RealSegmentResponse, SystemStatus, TranscriptResult, VoiceInputSource, WorkOrdersResponse } from "./types";
 
 export const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -144,6 +144,13 @@ export const api = {
   /** Work orders for one mission's findings. Always answers: a locked, keyless or over-budget backend writes them from the offline rules and says so. */
   workOrders: (missionId: string, language: Language = "en") =>
     post<WorkOrdersResponse>(`/api/inspection/${encodeURIComponent(missionId)}/work-orders`, { language }, 90_000),
+  /** SAM 3.1 on one camera frame (JPEG), one request per prompt. Always answers: a keyless or locked backend says so and draws nothing. */
+  segmentImage: (frame: Blob, prompts: string[]) => {
+    const form = new FormData();
+    form.append("frame", frame, "frame.jpg");
+    for (const p of prompts) form.append("prompt", p);
+    return request<RealSegmentResponse>("/api/ai/segment-image", { method: "POST", body: form, timeoutMs: 60_000 });
+  },
   preflight: () => request<Preflight>("/api/system/preflight", { timeoutMs: 4000 }),
   executions: (limit = 50) => request<ExecutionLog>(`/api/evidence/model-executions?limit=${limit}`, { timeoutMs: 4000 }),
   transcribe: (wav: Blob, inputSource: VoiceInputSource = "LIVE_MICROPHONE", language: Language = "en") => {

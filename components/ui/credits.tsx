@@ -258,7 +258,7 @@ export function useLiveLock(): LiveLock {
   });
 }
 
-const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+export const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
 /**
  * Modal passcode entry. The passcode goes to the backend in the body of POST /api/system/unlock and, once it works, is kept in

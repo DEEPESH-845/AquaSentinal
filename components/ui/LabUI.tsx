@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { ChevronDown, ChevronUp, Compass, Lock, LockOpen, Maximize2, Minimize2, OctagonX, Play, RotateCcw } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Compass, Lock, LockOpen, Maximize2, Minimize2, OctagonX, Play, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -16,6 +16,7 @@ import { IntelligenceCard, OriginTag } from "./intelligence";
 import { MissionCard } from "./mission";
 import { DemoCard, VisionMoment } from "./overlays";
 import { PerceptionCard } from "./perception";
+import { RealWaterDialog } from "./realcam";
 import { ReportCard } from "./report";
 import { EnvironmentCard, GantryCard, OverviewCard, SystemCard } from "./scenes";
 import { Btn, Dot } from "./shared";
@@ -69,6 +70,7 @@ export function LabUI() {
   const panels = useSimStore((s) => s.panels);
   const setScene = useSimStore((s) => s.setScene);
   const unlockOpen = useMissionStore((s) => s.unlockOpen);
+  const [camOpen, setCamOpen] = useState(false);
   const visionColumnWidth = useVisionColumnWidth();
   const columnWidth = scene === 3 ? visionColumnWidth : 300;
 
@@ -103,7 +105,7 @@ export function LabUI() {
         className="pointer-events-none absolute inset-0 select-none overflow-hidden max-[999px]:flex max-[999px]:flex-col"
         style={{ "--col-w": `${columnWidth}px` } as React.CSSProperties}
       >
-        <TopBar />
+        <TopBar onCamera={() => setCamOpen(true)} />
 
         {/* left rail: scene index. Below 1000 px it is a horizontal strip directly above the card. */}
         <nav
@@ -216,6 +218,7 @@ export function LabUI() {
         </div>
 
         <AnimatePresence>{showVision && <VisionMoment key="vision" />}</AnimatePresence>
+        <AnimatePresence>{camOpen && <RealWaterDialog key="realcam" onClose={() => setCamOpen(false)} />}</AnimatePresence>
         <AnimatePresence>{unlockOpen && <UnlockDialog key="unlock" />}</AnimatePresence>
       </div>
       <Tour />
@@ -257,7 +260,8 @@ function StatusChip({
       {icon ?? <Dot tone={tone} pulse={pulse} />}
       {/* The name is spoken, not drawn, below 1600 px: the value says what the chip is, and the header needs the room for the full
           credit chip (from 1280 px). Header thresholds, all "narrower than N" in Tailwind 4: chip names 1600, full credit chip 1280,
-          MISSION CONTROL label 1440. */}
+          MISSION CONTROL label 1440. The camera button is always drawn, so below 1200 the focus toggle gives way to it, the Run demo word
+          appears from 760 and the E-stop word from 380 (the icons keep their accessible names and titles). */}
       <span className={clsx("label text-text max-[1600px]:sr-only", hide)}>{name}</span>
       <span className={clsx("label text-[9px]", valueClass ?? "text-dim", hide)}>{value}</span>
     </>
@@ -330,12 +334,12 @@ function EstopButton() {
     </Btn>
   ) : (
     <Btn danger onClick={emergencyStop} label="Emergency stop" title="Stop all motion now">
-      <OctagonX size={14} /> E-stop
+      <OctagonX size={14} /> <span className="max-[379px]:sr-only">E-stop</span>
     </Btn>
   );
 }
 
-function TopBar() {
+function TopBar({ onCamera }: { onCamera: () => void }) {
   const demoActive = useSimStore((s) => s.demo.active);
   const focus = useSimStore((s) => !s.panels.card && !s.panels.telemetry);
   const { startDemo, reset, setPanels, setTourStep } = useSimStore(useShallow((s) => ({ startDemo: s.startDemo, reset: s.reset, setPanels: s.setPanels, setTourStep: s.setTourStep })));
@@ -366,7 +370,19 @@ function TopBar() {
         <span className="mx-1 h-5 w-px bg-line max-[1200px]:hidden" />
         <button
           type="button"
-          className="btn btn-icon max-[999px]:hidden"
+          className="btn btn-icon"
+          onClick={onCamera}
+          disabled={demoActive}
+          aria-haspopup="dialog"
+          aria-label="Real water camera"
+          title="Real water camera: segment a phone or laptop camera frame with SAM 3.1"
+          data-testid="realcam-open"
+        >
+          <Camera size={14} />
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon max-[1200px]:hidden"
           onClick={() => setPanels({ card: focus, telemetry: focus })}
           aria-pressed={focus}
           aria-label={focus ? "Show panels" : "Focus the 3D view"}
@@ -376,8 +392,7 @@ function TopBar() {
           {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
         <Btn primary onClick={startDemo} disabled={demoActive} label={demoActive ? "Demo running" : "Run demo"}>
-          <Play size={14} /> <span className="max-[520px]:hidden">{demoActive ? "Demo running" : "Run demo"}</span>
-          <span className="min-[520px]:hidden max-[380px]:hidden">Demo</span>
+          <Play size={14} /> <span className="max-[759px]:hidden">{demoActive ? "Demo running" : "Run demo"}</span>
         </Btn>
         <Btn onClick={reset} disabled={demoActive} label="Reset lab">
           <RotateCcw size={14} /> <span className="max-[759px]:hidden">Reset</span>

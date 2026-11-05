@@ -166,6 +166,42 @@ export interface WorkOrdersResponse {
   language: Language;
 }
 
+export interface RealInstance {
+  box: [number, number, number, number];
+  /** the model's own score; null when it gave none (null is not zero) */
+  confidence: number | null;
+  areaPx: number;
+  polygons: Array<Array<[number, number]>>;
+}
+
+export interface RealSegment {
+  prompt: string;
+  status: "OK" | "EMPTY" | "FAILED" | "SKIPPED_BUDGET";
+  /** null for a replayed (cached) answer: nothing was measured */
+  latencyMs: number | null;
+  error: string | null;
+  instances: RealInstance[];
+}
+
+/** SAM 3.1 on one camera frame. The masks are in the pixels of the frame that was sent (width x height). */
+export interface RealSegmentResponse {
+  width: number;
+  height: number;
+  segments: RealSegment[];
+  /** SAM_3_1 when the model answered at least one phrase; UNAVAILABLE when there is no key, no passcode, or every request failed */
+  provider: "SAM_3_1" | "UNAVAILABLE";
+  model: string | null;
+  executionIds: string[];
+  /** how the Meta calls behind the masks were made; null when none succeeded */
+  classification: ModelExecution["classification"] | null;
+  /** the slowest phrase (they run side by side); null when every answer was replayed or none was asked */
+  latencyMs: number | null;
+  /** estimate from Meta list prices over this shutter's live executions; a replay costs 0 */
+  costUsd: number;
+  fallback: "NO_KEY" | "LIVE_LOCKED" | null;
+  note: string;
+}
+
 export interface ImageQuality {
   brightness: number;
   contrast: number;
