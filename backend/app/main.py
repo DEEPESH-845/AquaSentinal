@@ -35,6 +35,7 @@ from .mission.ask import AskService
 from .mission.service import MissionError, MissionService
 from .mission.workorders import WorkOrderService
 from .perception.pipeline import PerceptionPipeline
+from .perception.realwater import clean_prompts, segment_image
 from .reporting import build_report, to_markdown
 from .schemas import (
     AskRequest,
@@ -46,6 +47,7 @@ from .schemas import (
     Language,
     MissionSpec,
     ObservationCreate,
+    RealSegmentResponse,
     SegmentRequest,
     StartRequest,
     SummaryRequest,
@@ -60,6 +62,14 @@ log = logging.getLogger("aquasentinal")
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 # 16 kHz mono WAV is 32 kB/s, so this is about five minutes of speech
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
+
+async def read_frame(upload: UploadFile) -> bytes:
+    """The uploaded frame, or 413 when it is missing, empty or over MAX_FRAME_BYTES. One check for every route that takes a frame."""
+    jpeg = await upload.read(MAX_FRAME_BYTES + 1)
+    if not jpeg or len(jpeg) > MAX_FRAME_BYTES:
+        raise HTTPException(413, "frame missing or larger than 4 MB")
+    return jpeg
 
 
 class UnlockBody(BaseModel):
@@ -309,6 +319,19 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         s.repo.save_segmentation(seg)
         return seg.model_dump(by_alias=True)
 
+    @app.post("/api/ai/segment-image", response_model=RealSegmentResponse)
+    async def segment_real_image(request: Request, frame: UploadFile = File(...), prompt: list[str] = Form(...), live: bool = Depends(live_access)):
+        """SAM 3.1 on one camera frame, one request per prompt (one or two). A keyless or locked backend still answers, saying so, and sends nothing."""
+        try:
+            prompts = clean_prompts(prompt)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        jpeg = await read_frame(frame)
+        try:
+            return await segment_image(S(request).sam, jpeg, prompts, live)
+        except ValueError as e:  # not a decodable image
+            raise HTTPException(422, str(e))
+
     # ------------------------------------------------------------ missions
 
     @app.post("/api/missions")
@@ -357,9 +380,7 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
             m = CaptureMeta.model_validate_json(meta)
         except ValidationError as e:
             raise HTTPException(422, e.errors(include_url=False, include_context=False))
-        jpeg = await frame.read(MAX_FRAME_BYTES + 1)
-        if not jpeg or len(jpeg) > MAX_FRAME_BYTES:
-            raise HTTPException(413, "frame missing or larger than 4 MB")
+        jpeg = await read_frame(frame)
         ids = await idmask.read(MAX_FRAME_BYTES + 1) if idmask else None
         if ids and len(ids) > MAX_FRAME_BYTES:
             raise HTTPException(413, "id mask larger than 4 MB")

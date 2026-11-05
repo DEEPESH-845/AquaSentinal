@@ -475,6 +475,48 @@ class WorkOrdersResponse(Wire):
     language: Language
 
 
+# ---------------------------------------------------------------- real water camera
+
+MAX_REAL_PROMPTS = 2  # SAM 3.1 requests (one per prompt) a single shutter may cost
+RealSegmentStatus = Literal["OK", "EMPTY", "FAILED", "SKIPPED_BUDGET"]
+
+
+class RealInstance(Wire):
+    """One mask SAM 3.1 returned for a phrase, in the pixels of the frame that was sent."""
+
+    box: tuple[int, int, int, int]
+    confidence: float | None  # the model's own score; None when it gave none (None is not zero)
+    area_px: int
+    polygons: list[list[tuple[int, int]]]
+
+
+class RealSegment(Wire):
+    """The answer to one phrase: one SAM 3.1 request, or the reason there was none."""
+
+    prompt: str
+    status: RealSegmentStatus
+    latency_ms: float | None  # None for a replayed (cached) answer: nothing was measured
+    error: str | None
+    instances: list[RealInstance]
+
+
+class RealSegmentResponse(Wire):
+    width: int
+    height: int
+    segments: list[RealSegment]
+    # SAM_3_1 when the model answered at least one phrase; UNAVAILABLE when no key, no passcode, or every request failed
+    provider: Literal["SAM_3_1", "UNAVAILABLE"]
+    model: str | None
+    # every Meta execution this shutter cost or replayed
+    execution_ids: list[str]
+    # how the Meta calls behind the masks were made: LIVE_META, CACHED_LIVE, MOCKED ... None when none succeeded
+    classification: str | None
+    latency_ms: float | None  # the slowest phrase (they run side by side); None when every answer was replayed or none was asked
+    cost_usd: float  # estimate from Meta list prices, summed over this shutter's LIVE_META executions (what the budget counts); a replay costs 0
+    fallback: Literal["NO_KEY", "LIVE_LOCKED"] | None
+    note: str
+
+
 # ---------------------------------------------------------------- commands over /ws/commands and /api/gantry
 
 
