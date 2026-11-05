@@ -255,7 +255,7 @@ export function Segmented<T extends string>({
             e.stopPropagation();
             move(d);
           }}
-          className={clsx("relative px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.1em] transition-colors duration-200", o.id === value ? "text-teal" : "text-muted hover:text-text")}
+          className={clsx("relative px-2 py-[3px] font-mono text-[10px] uppercase transition-colors duration-200", o.lang ? "tracking-normal" : "tracking-[0.1em]", o.id === value ? "text-teal" : "text-muted hover:text-text")}
         >
           {o.text}
         </button>

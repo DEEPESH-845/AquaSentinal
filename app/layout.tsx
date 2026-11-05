@@ -4,8 +4,8 @@ import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const plexMono = IBM_Plex_Mono({ variable: "--font-plex-mono", subsets: ["latin"], weight: ["400", "500", "600"] });
-// Hindi text from Meta models. Neither font above has Devanagari glyphs; the browser fetches this one only when a page shows some.
-const devanagari = Noto_Sans_Devanagari({ variable: "--font-devanagari", subsets: ["devanagari"], weight: ["400", "500", "600"] });
+// Hindi text from Meta models. Neither font above has Devanagari glyphs; preload is off so English pages do not download it up front.
+const devanagari = Noto_Sans_Devanagari({ variable: "--font-devanagari", subsets: ["devanagari"], weight: ["400", "500", "600"], preload: false });
 
 export const metadata: Metadata = {
   title: "AquaSentinal - AI Underwater Inspection",
