@@ -134,6 +134,38 @@ export interface AskResponse {
   language: Language;
 }
 
+export type WorkOrderPriority = "P1" | "P2" | "P3";
+
+/** One job for a crew. evidence: capture ids of this mission; location: gantry cm. */
+export interface WorkOrder {
+  id: string;
+  priority: WorkOrderPriority;
+  title: string;
+  location: { x: number; y: number };
+  evidence: string[];
+  action: string;
+  effort: "S" | "M" | "L";
+  rationale: string;
+}
+
+export interface WorkOrdersResponse {
+  orders: WorkOrder[];
+  provider: "MUSE_SPARK" | "OFFLINE_RULES";
+  model: string | null;
+  /** every Meta execution behind the list, also when the offline rules wrote it after a call failed */
+  executionIds: string[];
+  /** how the Meta call behind a MUSE_SPARK list was made; null for an offline list */
+  classification: ModelExecution["classification"] | null;
+  /** why the offline rules wrote the list; null when Muse Spark wrote it (or there was nothing to order) */
+  fallback: AskFallback | null;
+  note: string;
+  /** capture ids the model cited that no record holds, and how many of its orders were dropped */
+  droppedEvidence: string[];
+  droppedOrders: number;
+  /** the language the orders are written in: offline orders are English whatever was asked for */
+  language: Language;
+}
+
 export interface ImageQuality {
   brightness: number;
   contrast: number;

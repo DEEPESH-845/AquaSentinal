@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { ApiError, api, getPasscode, setPasscode, setRejectedHandler, type TwinContext } from "@/lib/api/client";
-import type { AskResponse, CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
+import type { AskResponse, CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource, WorkOrdersResponse } from "@/lib/api/types";
 import { PushToTalk } from "@/lib/audio/wav";
 import { useSimStore } from "@/lib/sim/store";
 import type { CaptureRequest, MissionResult } from "@/lib/sim/types";
@@ -49,6 +49,15 @@ export interface AskView {
   revealed: boolean;
 }
 
+/** The work orders of one mission, from the moment the operator asks for them. */
+export interface WorkOrdersView {
+  status: "PENDING" | "DONE" | "FAILED";
+  /** the language asked for; the response says which language it is actually in */
+  language: Language;
+  response?: WorkOrdersResponse;
+  error?: string;
+}
+
 const MAX_ASKS = 20;
 let askSeq = 0;
 
@@ -91,6 +100,8 @@ interface MissionStore {
   askDraft: string;
   /** questions to the inspector, oldest first, across missions */
   asks: AskView[];
+  /** work orders by mission id */
+  workOrders: Record<string, WorkOrdersView>;
   events: EventEnvelope[];
   /** the unlock dialog is open */
   unlockOpen: boolean;
@@ -131,6 +142,8 @@ interface MissionStore {
   /** Sends a question about the shown report's mission. One at a time; a failed one puts its text back in the box. */
   ask: (question: string) => Promise<void>;
   markAskRevealed: (id: number) => void;
+  /** Asks the backend for the shown report's work orders: Muse Spark when live, the offline rules otherwise. An explicit action, so credits are spent only on it. */
+  generateWorkOrders: () => Promise<void>;
   setUnlockOpen: (open: boolean) => void;
   /** Checks a passcode with the backend and, if it works, keeps it for this tab. `error` is set when it did not; `blocked`: the attempt limit was hit, so the wait is in `unlockBlockedUntil`. */
   unlock: (passcode: string) => Promise<{ ok: boolean; error?: string; blocked?: boolean }>;
@@ -181,6 +194,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   history: [],
   askDraft: "",
   asks: [],
+  workOrders: {},
   events: [],
   unlockOpen: false,
   lockNotice: null,
@@ -480,6 +494,21 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   },
 
   markAskRevealed: (id) => set({ asks: get().asks.map((a) => (a.id === id ? { ...a, revealed: true } : a)) }),
+
+  generateWorkOrders: async () => {
+    const missionId = get().report?.mission.id;
+    if (!missionId || get().workOrders[missionId]?.status === "PENDING") return;
+    const language = get().language;
+    const patch = (v: WorkOrdersView) => set({ workOrders: { ...get().workOrders, [missionId]: v } });
+    // the previous list stays on screen while the new one is written
+    patch({ ...get().workOrders[missionId], status: "PENDING", language });
+    try {
+      patch({ status: "DONE", language, response: await api.workOrders(missionId, language) });
+      void get().refreshEvidence(); // the call's execution is in the log now
+    } catch (e) {
+      patch({ ...get().workOrders[missionId], status: "FAILED", language, error: msg(e) });
+    }
+  },
 
   setUnlockOpen: (unlockOpen) => set({ unlockOpen }),
 
