@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { WorkOrder, WorkOrdersResponse } from "@/lib/api/types";
 import { expect, test, type Lab } from "./lab";
-import { BACKEND, CORS, mockProviders, seedMission } from "./seed";
+import { BACKEND, CORS, mockProviders, seedMission, trackedAt } from "./seed";
 
 /**
  * Work orders (scene 07, in the report above Ask the inspector). The e2e backend has no key, so the offline rule table writes the orders for
@@ -70,12 +70,12 @@ test.describe("Work orders", () => {
     await expect(cable).toHaveAttribute("data-priority", "P1");
     await expect(cable).toHaveAttribute("data-id", "WO-01");
     await expect(cable).toContainText("Secure and re-route the loose cable");
-    await expect(cable).toContainText("(66.0, 30.0) cm");
+    await expect(cable).toContainText(await trackedAt(page, "loose_cable"));
     await expect(cable).toContainText("effort M");
     await expect(cable).toContainText("unverified anomaly candidate");
     await expect(foreign).toHaveAttribute("data-priority", "P2");
     await expect(foreign).toContainText("Remove the foreign object");
-    await expect(foreign).toContainText("(85.0, 9.0) cm");
+    await expect(foreign).toContainText(await trackedAt(page, "foreign_object"));
 
     // each order shows the stored frame it rests on, loaded from the backend
     for (const [card, captureId] of [[cable, mission.captureIds[0]], [foreign, mission.captureIds[1]]] as const) {
@@ -126,7 +126,7 @@ test.describe("Work orders", () => {
     await expect(pages.nth(0)).toContainText("Secure and re-route the loose cable");
     await expect(pages.nth(0)).toContainText("P1");
     await expect(pages.nth(0)).toContainText("Location");
-    await expect(pages.nth(0)).toContainText("(66.0, 30.0) cm");
+    await expect(pages.nth(0)).toContainText(await trackedAt(page, "loose_cable"));
     await expect(pages.nth(0)).toContainText("Completed by");
     await expect(pages.nth(0)).toContainText("Written by offline rules, no model");
     await expect(pages.nth(1)).toContainText("Remove the foreign object");

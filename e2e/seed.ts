@@ -67,3 +67,13 @@ export async function seedMission(page: Page): Promise<{ id: string; captureIds:
     return { id: mission.id as string, captureIds };
   }, BACKEND);
 }
+
+/**
+ * Where the report tracks an object, formatted as the answers and orders print it. An asset keeps one position across missions, so
+ * sightings left by earlier specs in the same backend can move it a fraction of a centimetre from where this mission saw it.
+ */
+export const trackedAt = (page: Page, label: string) =>
+  page.evaluate((label) => {
+    const a = window.__missionStore!.getState().report!.assets.find((a) => a.label === label)!;
+    return `(${a.x.toFixed(1)}, ${a.y.toFixed(1)}) cm`;
+  }, label);

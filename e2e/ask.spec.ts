@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { AskResponse } from "@/lib/api/types";
 import { expect, test, type Lab } from "./lab";
-import { BACKEND, CORS, mockProviders, seedMission } from "./seed";
+import { BACKEND, CORS, mockProviders, seedMission, trackedAt } from "./seed";
 
 /**
  * Ask the inspector (scene 07, under the report). The e2e backend has no key, so the offline records query answers for real from a
@@ -71,7 +71,8 @@ test.describe("Ask the inspector", () => {
     const first = answers(page).first();
     await expect(first).toHaveAttribute("data-provider", "OFFLINE_RECORDS_QUERY");
     await expect(first).toHaveAttribute("data-fallback", "NO_KEY");
-    await expect(first.getByTestId("ask-answer-text")).toContainText(/Loose cable \w{6} is at \(66\.0, 30\.0\) cm, observed 1 time\(s\) \[1\]\./);
+    const cable = await trackedAt(page, "loose_cable"); // where the report tracks it; earlier specs' sightings can move it a fraction of a centimetre
+    await expect(first.getByTestId("ask-answer-text")).toContainText(new RegExp(`Loose cable \\w{6} is at ${cable.replace(/[().]/g, "\\$&")}, observed 1 time\\(s\\) \\[1\\]\\.`));
     await expect(first.getByTestId("ask-badges")).toHaveText("OFFLINE RECORDS QUERY");
     await expect(first).not.toContainText("cap_");
     await expect(first).toContainText("tools: list_observations, get_track");
@@ -82,7 +83,7 @@ test.describe("Ask the inspector", () => {
     await expect(chip).toHaveCount(1);
     await expect(chip).toHaveAttribute("data-capture", mission.captureIds[0]);
     await expect(chip).toContainText("loose cable");
-    await expect(chip).toContainText("(66.0, 30.0)");
+    await expect(chip).toContainText(cable.replace(" cm", ""));
     await expect.poll(() => chip.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     await expect(chip.locator("img")).toHaveAttribute("src", `${BACKEND}/api/inspection/frames/${mission.captureIds[0]}`);
 
