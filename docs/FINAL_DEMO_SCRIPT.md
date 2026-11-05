@@ -2,7 +2,8 @@
 
 One scenario: a submerged pipeline inspection with a loose cable, foreign objects and a controlled rise in turbidity (preset E).
 Every segment shows a hackathon-built capability; the inherited tank and gantry appear only as the place where it happens.
-Target length two minutes; adapt to the official video limit if it differs.
+Target length two minutes for the automated judge demo, or 2:30 for the full video in docs/SUBMISSION_STRATEGY.md; adapt to the official video limit if it differs.
+The public deployment has no Meta key yet, so it runs in labelled offline mode and no recorded live run exists; claim only what the labels show.
 
 ## Before you start
 
@@ -17,6 +18,8 @@ Target length two minutes; adapt to the official video limit if it differs.
 3. Open http://localhost:3000, press `8` (Intelligence), and confirm the Judge preflight panel.
    "live Meta verified" appears only after one successful live call; run `npm run eval:meta` once beforehand, or plan one mission by hand, so it is green before recording.
 4. If the preflight shows "live Meta not verified", the Meta parts of this script cannot be claimed. Use the technical backup at the end.
+5. If `AQUA_LIVE_PASSCODE` is set on the backend, enter the passcode once from the AI chip in the top bar; until then every Meta-calling step is labelled LIVE LOCKED and behaves as offline.
+6. Glance at the credit chip in the top bar: it shows spend against the budget cap.
 
 ## Execution labels the audience will see
 
@@ -28,6 +31,8 @@ Target length two minutes; adapt to the official video limit if it differs.
 | LIVE MICROPHONE | The audio was recorded with push-to-talk just now |
 | SIMULATED | Digital twin: gantry motion, water, camera frames |
 | DETERMINISTIC | Ordinary code: compiler, tracker, controller |
+| CACHED LIVE | An identical earlier live request was answered from the response cache; zero cost, and it points at the original execution |
+| LIVE LOCKED | Live mode is locked by the passcode; the step behaved as if no key were set |
 | OFFLINE FALLBACK | No key or the model failed; a labelled rule-based or geometric substitute was used |
 | NOT RUN | The step has not happened yet |
 
@@ -73,16 +78,39 @@ Screen: REPORT. Outcome, captures, pauses, targets; then Report (07) with assets
 
 Say: "Every finding keeps its frame, its model, its confidence and its coordinates. Nothing is called a defect until a person verifies it, and the report says which strips could not be inspected."
 
-### 1:50 to 2:00, impact
+### 1:50 to 2:20, Act 6: ask, act, afford (adds 30 seconds; skip in the 2:00 cut)
 
-Screen: scene 08 execution log with LIVE META rows.
+Screen: Report (07). Under the report, Ask the inspector: type or click "Where is the loose cable?".
+
+Say: "The answer is built from the stored records through read-only tools, and every claim cites a capture. Click the citation and the twin moves to that asset."
+
+Screen: Work orders card, then Print work orders.
+
+Say: "Findings become prioritised work orders with their evidence frames, one page each. Hindi works here too, with the Meta models."
+
+Screen: the credit chip popover in the top bar.
+
+Say: "Every Meta call passes a governor: a cache, a hard budget cap and a passcode lock. This is how the credits stay under control."
+
+Offline, the Ask answer carries a labelled fallback tag and Hindi shows "Hindi needs the Meta models"; say so out loud.
+
+### 1:50 to 2:00 (2:20 to 2:30 in the full cut), impact
+
+Screen: scene 08 execution log with LIVE META rows (offline, the rows carry their offline labels; do not call them live).
 
 Say: "Target: fixed tanks and basins in aquaculture and water treatment, where a rail camera is realistic. Next: a physical tank run and operator trials."
 
+### Optional: real water camera (adds 15 seconds, hand-held)
+
+Press the camera icon in the header, allow the camera on a phone or laptop, point it at water or any scene, press the shutter.
+With the key SAM 3.1 outlines the named things and the masks carry LIVE META.
+Without it the panel says "SAM 3.1 needs the Meta key" and shows only the frame; say that.
+It cannot be part of the headless scripted recording; film it by hand.
+
 ## Optional live voice moment (adds 15 seconds)
 
-Before pressing Start judge demo, go to Mission (05), hold **Hold to talk**, speak the instruction, release.
-The transcript appears tagged LIVE MICROPHONE.
+Before pressing Start judge demo, go to Mission (05), choose the language (EN or Hindi) in the mission panel, hold **Hold to talk**, speak the instruction, release.
+The transcript appears tagged LIVE MICROPHONE, and the plan explanation follows the chosen language.
 Plan it, show the tool timeline, then discard and start the judge demo.
 
 ## Technical backup (network or key failure)
@@ -91,6 +119,8 @@ Plan it, show the tool timeline, then discard and start the judge demo.
 2. If Muse Spark fails, the card shows the error. Press Exit demo, go to Mission (05), and press "Use the offline parser instead" only if you say "this is the rule-based fallback, not Muse Spark". The plan is tagged OFFLINE FALLBACK.
 3. If there is no key at all, run the demo anyway as a demonstration of the deterministic layers (validation, adaptive control, evidence) and say clearly that no Meta model ran. Every model step will read OFFLINE FALLBACK or NOT RUN.
 4. Never replace a live call with a recording of a previous run without saying it is a recording.
+5. If the budget cap is reached, calls are refused before they are sent (HTTP 402) and the credit chip turns red; the offline paths keep working. Say so.
+6. If the backend is asleep (Render free tier), open the backend URL first and wait for it to answer.
 
 ## What not to claim
 
@@ -98,3 +128,6 @@ Plan it, show the tool timeline, then discard and start the judge demo.
 - Without LIVE META tags on screen, nothing shown came from a Meta model.
 - Segmentation is not a structural diagnosis.
 - No measured improvement over current practice; the comparison numbers are from the simulation.
+- No recorded live run exists and the SAM 3.1 murk benchmark was not built; do not say SAM performs well in murky water.
+- The sourced context figures are only those in docs/IMPACT_AND_MARKET.md; the impact metrics are targets, not results.
+- Hindi quality has not been checked on live Meta output.
