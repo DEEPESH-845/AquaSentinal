@@ -46,7 +46,7 @@ A second risk outside the code: the hackathon's start date has not been checked 
 
 ### Technical depth and execution: 7
 
-- Evidence: deterministic twin shared with a Python port through cross-language fixtures; AI-to-hardware split where the model produces a spec and a compiler bounds motion; latching e-stop, interlocks and watchdog; adaptive controller with measured fixed versus adaptive results on ten presets and a replay check; 56 backend tests, 15 Playwright spec files, failure handling mapped to tests (docs/TECHNICAL_EVALUATION.md).
+- Evidence: deterministic twin shared with a Python port through cross-language fixtures; AI-to-hardware split where the model produces a spec and a compiler bounds motion; latching e-stop, interlocks and watchdog; adaptive controller with measured fixed versus adaptive results on ten presets and a replay check; 143 backend tests, 22 Playwright spec files, failure handling mapped to tests (docs/TECHNICAL_EVALUATION.md).
 - Missing: SAM IoU and Spark parsing accuracy (need a key); an image-based segmentation baseline; any physical hardware run.
 - Risks: the twin's detector is geometric, so simulated perception results flatter the system; adaptive control did worse under fading light (preset F).
 - Actions: run the live evaluation; add a simple colour-threshold baseline on the three eval frames; feed lighting into the controller or state the limit in the demo.
@@ -57,6 +57,23 @@ A second risk outside the code: the hackathon's start date has not been checked 
 - Missing: the live Meta moments that make it impressive; a recorded video.
 - Risks: without a key every model step reads OFFLINE FALLBACK, which is honest but not compelling; network failure on stage.
 - Actions: record the video with a key, following docs/DEMO_SHOT_LIST.md; keep the technical backup path rehearsed.
+
+## Update on 2026-11-05 (branch `feat/meta-hero`)
+
+The scores above are not re-estimated: the gaps that carry the weight (a live execution, a recorded live run) still need the key.
+This section lists what changed so the next estimate starts from facts.
+
+| Area | What changed | Where to see it | Still needs the key |
+|---|---|---|---|
+| Credit discipline | Response cache, USD budget cap, saved-calls counter and an optional passcode lock sit under every Meta call; a header chip shows spend and lock state | Credit chip in the header, `GET /api/system/status`, `backend/tests/test_governor.py`, `e2e/credits.spec.ts` | A live call to move the chip off `$0.000` |
+| Meta as visible hero | Ask the inspector (Spark over read-only record tools, cited answers) and Work orders (Spark structured output, evidence frames, print) in scene 07, each with offline, locked and failed paths labelled | Scene 07, `test_ask.py`, `test_workorders.py`, `e2e/ask.spec.ts`, `e2e/workorders.spec.ts` | Live Spark replies: only mocked HTTP so far |
+| Physical-world input | Real water camera: a phone or laptop frame goes to SAM 3.1 through the governor and the masks are drawn over the still | Header camera button, `test_realwater.py`, `e2e/realcam.spec.ts` | SAM 3.1 on real water: no measurement exists, so no accuracy is claimed |
+| Impact | Hindi for voice, plans, summaries, Ask and work orders (Meta models only; offline paths stay English and say so); a walkthrough opening with sourced context | Scene 05 language control, `/walkthrough`, `test_language.py`, `e2e/language.spec.ts`, docs/IMPACT_AND_MARKET.md | Hindi quality from the real models |
+| Submission kit | README, submission strategy and demo script updated; a scripted demo recorder | README.md, docs/SUBMISSION_STRATEGY.md, docs/FINAL_DEMO_SCRIPT.md | The recording itself needs a live run |
+
+Stage One item 5 is unchanged: zero `LIVE_META` executions exist, and every feature above is tested with mocked HTTP.
+Planned and not built on this branch: the murk benchmark, the live recorder, the `/proof` page and replay of a recorded run.
+No page or document claims them, and no recorded Meta run ships in `public/`.
 
 ## Priority order from here
 

@@ -34,7 +34,13 @@ twin at each capture waypoint --> CaptureRequest --> FeedRenderer renders frame 
     --> IoU vs ID pass --> track association --> observations --> stored, event capture.processed
 twin mission ends --POST /api/missions/{id}/complete--> COMPLETED/ABORTED --> summary (Spark or template)
     --> event report.ready --> GET /api/inspection/{id}/report (JSON or Markdown)
+operator question --POST /api/inspection/{id}/ask--> Muse Spark over read-only record tools --> grounded answer with citations
+operator click --POST /api/inspection/{id}/work-orders--> Muse Spark structured output over the tracked objects --> work orders citing capture ids
+phone or laptop camera frame --POST /api/ai/segment-image--> SAM 3.1 per noun phrase --> masks drawn over the still (nothing stored)
 ```
+
+Every arrow that reaches Meta passes through the governor (section 7): response cache, budget cap and live lock.
+Ask, work orders and the real water frame follow the same rule as planning: no key, a locked backend, an exhausted budget or a failed call produces a labelled offline answer, never a substitute presented as live.
 
 ## 4. REST routes
 
@@ -64,6 +70,7 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 | `GET /api/inspection/{id}/report?format=json or md` | Report built from stored records |
 | `POST /api/inspection/{id}/summary` | Regenerate the summary; optional body `{language}` overrides the mission's language. Offline templates stay English and are never machine-translated |
 | `POST /api/inspection/{id}/ask` | Body `{question, language}`. Muse Spark answers through at most three bounded requests over the read-only ASK tools (`list_observations`, `get_capture`, `get_track`, `get_mission_summary`, `compare_with_previous_mission`), each request cached, budgeted and lock-checked by the governor. Returns `{answer, citations: [{captureId, x, y, label}], toolCalls, provider, model, executionIds, classification, fallback, note, droppedCitations, language}`. Capture ids no tool returned are dropped; `[n]` in the answer refers to `citations[n - 1]`. When locked, keyless, over budget, failed or ungrounded, the deterministic `OFFLINE_RECORDS_QUERY` answers (where, how many, what, confidence) and `fallback` says why |
+| `POST /api/inspection/{id}/work-orders` | Body `{language}`. One Muse Spark structured-output request (`response_format` json_schema, at most 1500 output tokens) over the mission's tracked objects, through the governor. Returns `{orders: [{priority P1 to P3, title, location {x, y}, evidence [captureId], action, effort S, M or L, rationale}], provider, model, executionIds, classification, fallback, note, droppedEvidence, droppedOrders, language}`. An order whose evidence names no stored capture, or that fails the schema, is dropped and counted, never repaired; locations are clamped into the gantry travel. When keyless, locked, over budget, failed or ungrounded, a fixed rule table writes the orders (provider `OFFLINE_RULES`, English) and `fallback` says why. A mission with no observed object makes no request and orders nothing. Loose cables and foreign objects are written as anomaly candidates to verify on site. Nothing is stored |
 | `POST /api/gantry/command` | Command envelope (below) |
 | `GET /api/telemetry` | Gantry snapshot after one watchdog check, camera status |
 | `GET /api/camera/stream` | MJPEG of the latest frame |
@@ -86,7 +93,8 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 ## 7. Persistence
 
 - `backend/app/db.py` `Repository` is the only class that writes SQL (stdlib `sqlite3`, WAL mode).
-- Tables: `missions`, `captures`, `segmentations`, `assets`, `observations`, `summaries`; records are stored as validated JSON next to indexed keys.
+- Tables: `missions`, `captures`, `segmentations`, `assets`, `observations`, `summaries`, `model_executions` (every Meta request, see docs/META_MODEL_INTEGRATION.md) and `meta_cache` (the governor's response cache, keyed by the sha256 of the request); records are stored as validated JSON next to indexed keys.
+- Answers from Ask, work orders and the real water camera are not stored: the browser keeps them in memory (the last 20 questions), and the executions behind them are in `model_executions`.
 - Frames and ID masks are files under `AQUA_DATA_DIR/frames/<mission>/`.
 - `DATABASE_URL` accepts only `sqlite:///` in this build; a PostgreSQL implementation is a second class with the same methods, since every caller speaks Pydantic models.
 
@@ -102,5 +110,10 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 - The operator language (`en` or `hi`, default `en`) is `language` in `useMissionStore`, chosen with the EN | हिन्दी control in AI mission control and remembered in `localStorage` under `aqua.language` (read after mount; a blocked storage leaves the choice for the page only).
   It is sent as `language` on Voice Transcribe and planning requests, and only Meta models honour it.
   Wherever the output came from the offline parser or a template while Hindi is selected, the UI says `Hindi needs Meta models`: those paths stay English.
+- Ask the inspector and Work orders live in `components/ui/ask.tsx` and `components/ui/workorders.tsx` under the report in scene 07; their state (`asks`, `workOrders`) is in `useMissionStore` and is keyed by mission id.
+  Work orders print through a print stylesheet that leaves one order per page.
+- Real water (`components/ui/realcam.tsx`) is a modal opened from the header camera button.
+  It reads one frame from `getUserMedia` or an uploaded photo, downscales it to 1024 px on the long side as JPEG in the browser and sends it to `/api/ai/segment-image`; the camera is released when the dialog closes.
+  `getUserMedia` needs a secure origin, so on plain `http` over a LAN address the panel offers the upload instead.
 - `components/ui/credits.tsx` holds the header credit chip with its popover and the unlock dialog.
   Every figure comes from the `credits` object of the status; the popover carries the lock and unlock button wherever the header draws no AI chip (locked: below 600 px, unlocked: below 999 px).
