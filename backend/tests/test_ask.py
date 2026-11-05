@@ -366,3 +366,20 @@ def test_no_key_means_the_offline_records_query_and_the_route_still_exists(setti
         r = ask(c, seed(c), "Where is the loose cable?")
         assert r["fallback"] == "NO_KEY" and "MODEL_API_KEY" in r["note"]
 
+
+
+def test_a_whitespace_question_is_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas import AskRequest
+
+    with pytest.raises(ValidationError):
+        AskRequest(question="     ")
+    assert AskRequest(question="  where?  ").question == "where?"
+
+
+@pytest.mark.anyio
+async def test_non_object_tool_arguments_come_back_as_a_failed_record():
+    rec = await ToolRegistry().dispatch("get_mission_summary", "5", "ASK", "MUSE_SPARK")
+    assert rec.ok is False

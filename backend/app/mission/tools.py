@@ -181,5 +181,5 @@ class ToolRegistry:
         except ValidationError as e:
             msg = "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors())
             return ToolCallRecord(name=name, arguments=args_dict, ok=False, error=f"invalid arguments: {msg}", phase=phase, by=by, at=time.time())
-        except (ToolNotPermitted, ValueError) as e:
+        except (ToolNotPermitted, ValueError, TypeError) as e:
             return ToolCallRecord(name=name, arguments=args_dict, ok=False, error=str(e), phase=phase, by=by, at=time.time())

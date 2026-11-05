@@ -377,6 +377,8 @@ class AskService:
                 fallback, note = "LIVE_META_FAILED", f"{NOTES['LIVE_META_FAILED']} ({e.status} {e.code or e.type or 'error'})"
             except NoAnswer as e:
                 fallback, note = "NO_ANSWER", f"{NOTES['NO_ANSWER']} ({e})"
+            except (TypeError, AttributeError, KeyError) as e:  # a malformed model reply (tool_calls or arguments of the wrong shape)
+                fallback, note = "LIVE_META_FAILED", f"{NOTES['LIVE_META_FAILED']} (malformed reply: {type(e).__name__})"
         log.info("ask fell back to the offline records query", extra={"mission": mission_id, "fallback": fallback})
         return await self._offline(mission, question, fallback, note, [e["id"] for e in executions], tried)
 

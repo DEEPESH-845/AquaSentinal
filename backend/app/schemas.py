@@ -204,6 +204,11 @@ class AskRequest(Wire):
     question: str = Field(min_length=3, max_length=500)
     language: Language = "en"
 
+    @field_validator("question", mode="before")
+    @classmethod
+    def _strip(cls, v: Any) -> Any:
+        return v.strip() if isinstance(v, str) else v
+
 
 class InterpretResponse(Wire):
     mission: MissionRecord
