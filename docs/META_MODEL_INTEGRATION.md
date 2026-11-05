@@ -26,6 +26,15 @@ No live Meta request has been made, so behaviour against the real service (laten
 - If the model answers without creating a mission, or the API fails, the route returns the error and the tool timeline; it never substitutes another provider silently.
 - The operator can explicitly choose the offline parser (`?offline=true`), and the result is labelled `OFFLINE_RULE_PARSER`.
 
+## Ask the inspector
+
+- `AskService` (`backend/app/mission/ask.py`) answers one question about one mission with `muse-spark-1.3`, at most three requests, each capped at `ASK_MAX_TOKENS` output tokens.
+- The model is offered only the ASK phase of `ToolRegistry`: five read-only views of the stored records, and no tool that writes, moves or calls a model.
+- The system prompt requires `[cap_id]` after every factual claim; the backend keeps only ids that a tool result contained, numbers them `[1]`, `[2]` and lists the rest as `droppedCitations`.
+- An answer given without reading any record is sent back once to read them, and refused on the last turn.
+- Every request goes through the governed client, so repeats are served as `CACHED_*` executions, the budget cap applies, and a locked request makes no call. `executionIds` lists the executions behind the answer and `classification` is derived from them.
+- When Muse Spark cannot answer, the offline records query answers from the same tools and is labelled `OFFLINE_RECORDS_QUERY` with the reason (`LIVE_LOCKED`, `NO_KEY`, `BUDGET_EXCEEDED`, `LIVE_META_FAILED`, `NO_ANSWER`). It never translates: its answers are English.
+
 ## SAM 3.1
 
 - One concept per request, as the docs require; the pipeline sends at most three phrases per capture.

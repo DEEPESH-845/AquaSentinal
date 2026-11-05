@@ -62,6 +62,7 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 | `GET /api/inspection/history`, `GET /api/inspection/assets` | Mission history and persistent assets |
 | `GET /api/inspection/{id}/report?format=json or md` | Report built from stored records |
 | `POST /api/inspection/{id}/summary` | Regenerate the summary; optional body `{language}` overrides the mission's language. Offline templates stay English and are never machine-translated |
+| `POST /api/inspection/{id}/ask` | Body `{question, language}`. Muse Spark answers through at most three bounded requests over the read-only ASK tools (`list_observations`, `get_capture`, `get_track`, `get_mission_summary`, `compare_with_previous_mission`), each request cached, budgeted and lock-checked by the governor. Returns `{answer, citations: [{captureId, x, y, label}], toolCalls, provider, model, executionIds, classification, fallback, note, droppedCitations, language}`. Capture ids no tool returned are dropped; `[n]` in the answer refers to `citations[n - 1]`. When locked, keyless, over budget, failed or ungrounded, the deterministic `OFFLINE_RECORDS_QUERY` answers (where, how many, what, confidence) and `fallback` says why |
 | `POST /api/gantry/command` | Command envelope (below) |
 | `GET /api/telemetry` | Gantry snapshot after one watchdog check, camera status |
 | `GET /api/camera/stream` | MJPEG of the latest frame |
