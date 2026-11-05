@@ -41,7 +41,8 @@ export function focusCitation(c: AskCitation) {
   s.setCameraPreset(running ? "B" : "D");
 }
 
-const FALLBACK_TAG: Record<AskFallback, { text: string; tone: string }> = {
+/** Why the offline path wrote or answered instead of Muse Spark: the same reasons for every Meta-backed panel. */
+export const FALLBACK_TAG: Record<AskFallback, { text: string; tone: string }> = {
   LIVE_LOCKED: { text: "LIVE LOCKED", tone: "border-amber/60! text-amber!" },
   NO_KEY: { text: "", tone: "" },
   BUDGET_EXCEEDED: { text: "BUDGET REACHED", tone: "border-amber/60! text-amber!" },

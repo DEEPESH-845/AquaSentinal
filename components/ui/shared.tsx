@@ -174,6 +174,7 @@ export function Btn({
   className,
   title,
   label,
+  testId,
 }: {
   children: ReactNode;
   onClick: () => void;
@@ -184,6 +185,7 @@ export function Btn({
   className?: string;
   title?: string;
   label?: string;
+  testId?: string;
 }) {
   return (
     <button
@@ -192,6 +194,7 @@ export function Btn({
       disabled={disabled}
       title={title}
       aria-label={label}
+      data-testid={testId}
       className={clsx("btn inline-flex items-center gap-1.5", primary && "btn-primary", danger && "btn-danger", active && "btn-active", className)}
     >
       {children}

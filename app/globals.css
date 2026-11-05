@@ -181,3 +181,115 @@
     background: linear-gradient(to right, transparent, var(--color-line-strong), transparent);
   }
 }
+
+/* Work orders on paper (components/ui/workorders.tsx). The sheet is a direct child of body, hidden on screen. While it exists, printing
+   shows only it: white paper, black text, no 3D canvas or app chrome, one order per page. Without it (no orders yet) nothing changes. */
+.wo-print {
+  display: none;
+}
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  html:has(> body > .wo-print),
+  body:has(> .wo-print) {
+    background: #fff !important;
+    color: #000 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  body:has(> .wo-print) > :not(.wo-print) {
+    display: none !important;
+  }
+  .wo-print {
+    display: block;
+    background: #fff;
+    color: #000;
+    font-family: var(--font-sans);
+    font-size: 12pt;
+    line-height: 1.45;
+  }
+  .wo-print * {
+    color: #000 !important;
+    background: none !important;
+    box-shadow: none !important;
+  }
+  .wo-page {
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+  }
+  .wo-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  .wo-head {
+    font-family: var(--font-mono);
+    font-size: 10pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1.5pt solid #000;
+    padding-bottom: 4pt;
+  }
+  .wo-pri {
+    border: 1.5pt solid #000;
+    padding: 0 5pt;
+    margin-right: 4pt;
+    font-weight: 700;
+  }
+  .wo-sub {
+    float: right;
+  }
+  .wo-page h1 {
+    font-size: 20pt;
+    line-height: 1.2;
+    margin: 14pt 0 10pt;
+  }
+  .wo-page dl {
+    display: grid;
+    grid-template-columns: 24mm 1fr;
+    gap: 5pt 10pt;
+    margin: 0;
+  }
+  .wo-page dt {
+    font-family: var(--font-mono);
+    font-size: 9pt;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding-top: 2pt;
+  }
+  .wo-page dd {
+    margin: 0;
+  }
+  .wo-evidence {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8pt;
+    margin-top: 14pt;
+  }
+  .wo-evidence figure {
+    margin: 0;
+    break-inside: avoid;
+  }
+  .wo-evidence img {
+    display: block;
+    width: 62mm;
+    height: auto;
+    border: 0.75pt solid #000;
+  }
+  .wo-evidence figcaption {
+    font-family: var(--font-mono);
+    font-size: 8pt;
+    margin-top: 2pt;
+  }
+  .wo-sign {
+    margin-top: 28pt;
+    font-size: 10pt;
+  }
+  .wo-foot {
+    margin-top: 14pt;
+    border-top: 0.75pt solid #000;
+    padding-top: 4pt;
+    font-size: 9pt;
+  }
+}

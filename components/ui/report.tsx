@@ -9,6 +9,7 @@ import { GANTRY } from "@/lib/sim/constants";
 import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
 import { AskCard } from "./ask";
+import { WorkOrdersCard } from "./workorders";
 import { Btn, CardHead, HindiNeedsMeta, SourceTag, f1, f2, human, isTargetClass, pad2, pct, providerSource } from "./shared";
 import { C } from "@/lib/theme";
 
@@ -299,6 +300,7 @@ export function ReportCard() {
         )}
         <span className="text-[10px] leading-snug text-dim">{r.disclaimers[0]}</span>
       </div>
+      <WorkOrdersCard report={r} />
       <AskCard report={r} />
       <History />
     </div>
