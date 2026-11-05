@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { ApiError, api, getPasscode, setPasscode, setRejectedHandler, type TwinContext } from "@/lib/api/client";
-import type { CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
+import type { AskResponse, CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
 import { PushToTalk } from "@/lib/audio/wav";
 import { useSimStore } from "@/lib/sim/store";
 import type { CaptureRequest, MissionResult } from "@/lib/sim/types";
@@ -34,6 +34,23 @@ interface VoiceState {
 
 /** The last Voice Transcribe result and where its audio came from, so the UI never shows a recorded file as a live voice. */
 export type TranscriptView = TranscriptResult & { source: VoiceInputSource };
+
+/** One question to the inspector about a stored mission, from the moment it is sent. */
+export interface AskView {
+  id: number;
+  missionId: string;
+  question: string;
+  /** the language asked for; the answer says which language it is actually in */
+  language: Language;
+  status: "PENDING" | "DONE" | "FAILED";
+  response?: AskResponse;
+  error?: string;
+  /** the reveal animation has played, so a remount shows the answer at once */
+  revealed: boolean;
+}
+
+const MAX_ASKS = 20;
+let askSeq = 0;
 
 /** Prepared audio of the demo instruction (synthetic speech, macOS `say`). Always labelled RECORDED_INPUT. */
 export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
@@ -70,6 +87,10 @@ interface MissionStore {
   report: InspectionReport | null;
   reportError: string | null;
   history: HistoryItem[];
+  /** the question being typed or spoken in "Ask the inspector" */
+  askDraft: string;
+  /** questions to the inspector, oldest first, across missions */
+  asks: AskView[];
   events: EventEnvelope[];
   /** the unlock dialog is open */
   unlockOpen: boolean;
@@ -86,7 +107,8 @@ interface MissionStore {
   /** Reads the saved language once the page is mounted (the server render and the first client render are both "en"). */
   loadLanguage: () => void;
   startVoice: () => Promise<void>;
-  stopVoice: () => Promise<void>;
+  /** `target` is where the transcript goes: the mission instruction (default) or the question box of "Ask the inspector". */
+  stopVoice: (target?: "instruction" | "ask") => Promise<void>;
   /** Sends the prepared recording through Voice Transcribe. Returns the transcript, or null with voice.error set. */
   transcribeRecorded: () => Promise<string | null>;
   refreshEvidence: () => Promise<void>;
@@ -105,6 +127,10 @@ interface MissionStore {
   finishMission: (result: MissionResult) => Promise<void>;
   loadReport: (missionId: string) => Promise<void>;
   loadHistory: () => Promise<void>;
+  setAskDraft: (s: string) => void;
+  /** Sends a question about the shown report's mission. One at a time; a failed one puts its text back in the box. */
+  ask: (question: string) => Promise<void>;
+  markAskRevealed: (id: number) => void;
   setUnlockOpen: (open: boolean) => void;
   /** Checks a passcode with the backend and, if it works, keeps it for this tab. `error` is set when it did not; `blocked`: the attempt limit was hit, so the wait is in `unlockBlockedUntil`. */
   unlock: (passcode: string) => Promise<{ ok: boolean; error?: string; blocked?: boolean }>;
@@ -153,6 +179,8 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   report: null,
   reportError: null,
   history: [],
+  askDraft: "",
+  asks: [],
   events: [],
   unlockOpen: false,
   lockNotice: null,
@@ -224,13 +252,15 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     }
   },
 
-  stopVoice: async () => {
+  stopVoice: async (target = "instruction") => {
     if (!recorder || get().voice.state !== "RECORDING") return;
     set({ voice: { state: "TRANSCRIBING" } });
     try {
       const wav = await recorder.stop();
       const r = await api.transcribe(wav, "LIVE_MICROPHONE", get().language);
-      set({ instruction: r.transcript, transcript: { ...r, source: "LIVE_MICROPHONE" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
+      const voice: VoiceState = { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs };
+      // a spoken question is not the mission instruction: it must not become the voice step of the agent chain
+      set(target === "ask" ? { askDraft: r.transcript, voice } : { instruction: r.transcript, transcript: { ...r, source: "LIVE_MICROPHONE" }, voice });
     } catch (e) {
       recorder.cancel();
       set({ voice: { state: "ERROR", error: msg(e) } });
@@ -429,6 +459,27 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
       /* history is optional; the backend state chip already says why */
     }
   },
+
+  setAskDraft: (askDraft) => set({ askDraft }),
+
+  ask: async (question) => {
+    const q = question.trim();
+    const missionId = get().report?.mission.id;
+    if (q.length < 3 || !missionId || get().asks.some((a) => a.status === "PENDING")) return;
+    const id = ++askSeq;
+    const language = get().language;
+    const patch = (p: Partial<AskView>) => set({ asks: get().asks.map((a) => (a.id === id ? { ...a, ...p } : a)) });
+    set({ asks: [...get().asks.slice(1 - MAX_ASKS), { id, missionId, question: q, language, status: "PENDING", revealed: false }], askDraft: "" });
+    try {
+      patch({ status: "DONE", response: await api.ask(missionId, q, language) });
+      void get().refreshEvidence(); // the answer's executions are in the log now
+    } catch (e) {
+      patch({ status: "FAILED", error: msg(e), revealed: true });
+      if (!get().askDraft) set({ askDraft: q });
+    }
+  },
+
+  markAskRevealed: (id) => set({ asks: get().asks.map((a) => (a.id === id ? { ...a, revealed: true } : a)) }),
 
   setUnlockOpen: (unlockOpen) => set({ unlockOpen }),
 

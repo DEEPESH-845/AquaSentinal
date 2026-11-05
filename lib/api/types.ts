@@ -73,8 +73,8 @@ export interface ToolCallRecord {
   ok: boolean;
   result: unknown;
   error: string | null;
-  phase: "PLANNING" | "EXECUTION" | "REPORTING";
-  by: "MUSE_SPARK" | "OFFLINE_RULE_PARSER" | "OPERATOR" | "SYSTEM";
+  phase: "PLANNING" | "EXECUTION" | "REPORTING" | "ASK";
+  by: "MUSE_SPARK" | "OFFLINE_RULE_PARSER" | "OFFLINE_RECORDS_QUERY" | "OPERATOR" | "SYSTEM";
   at: number;
 }
 
@@ -103,6 +103,35 @@ export interface InterpretResponse {
   mission: MissionRecord;
   provider: Provider;
   model: string | null;
+}
+
+/** A capture an answer rests on. x, y: gantry cm of the object observed in it, or where the capture was taken when nothing was. label is a target class or "capture". */
+export interface AskCitation {
+  captureId: string;
+  x: number;
+  y: number;
+  label: string;
+}
+
+/** Why an offline records query answered instead of Muse Spark. LIVE_LOCKED is the passcode lock, not a missing key. */
+export type AskFallback = "LIVE_LOCKED" | "NO_KEY" | "BUDGET_EXCEEDED" | "LIVE_META_FAILED" | "NO_ANSWER";
+
+export interface AskResponse {
+  /** `[n]` markers refer to citations[n - 1] */
+  answer: string;
+  citations: AskCitation[];
+  toolCalls: ToolCallRecord[];
+  provider: "MUSE_SPARK" | "OFFLINE_RECORDS_QUERY";
+  model: string | null;
+  /** every Meta execution behind the answer, also when a fallback answered after a call failed */
+  executionIds: string[];
+  /** how the Meta calls behind a MUSE_SPARK answer were made; null for an offline answer */
+  classification: ModelExecution["classification"] | null;
+  fallback: AskFallback | null;
+  note: string;
+  droppedCitations: string[];
+  /** the language the answer is written in: offline answers are English whatever was asked for */
+  language: Language;
 }
 
 export interface ImageQuality {

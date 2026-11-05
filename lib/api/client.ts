@@ -1,7 +1,7 @@
 /**
  * Typed client for the AquaSentinal backend. The browser never talks to Meta: every model call goes through these routes.
  */
-import type { CaptureResult, ExecutionLog, HistoryItem, InspectionReport, InterpretResponse, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "./types";
+import type { AskResponse, CaptureResult, ExecutionLog, HistoryItem, InspectionReport, InterpretResponse, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "./types";
 
 export const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -138,6 +138,9 @@ export const api = {
   capture: (form: FormData) => request<CaptureResult>("/api/inspection/capture", { method: "POST", body: form, timeoutMs: 120_000 }),
   report: (id: string) => request<InspectionReport>(`/api/inspection/${encodeURIComponent(id)}/report`),
   history: () => request<HistoryItem[]>("/api/inspection/history"),
+  /** Grounded Q&A over one mission's stored records. Always answers: a locked, keyless or over-budget backend answers from the records and says so. */
+  ask: (missionId: string, question: string, language: Language = "en") =>
+    post<AskResponse>(`/api/inspection/${encodeURIComponent(missionId)}/ask`, { question, language }, 90_000),
   preflight: () => request<Preflight>("/api/system/preflight", { timeoutMs: 4000 }),
   executions: (limit = 50) => request<ExecutionLog>(`/api/evidence/model-executions?limit=${limit}`, { timeoutMs: 4000 }),
   transcribe: (wav: Blob, inputSource: VoiceInputSource = "LIVE_MICROPHONE", language: Language = "en") => {

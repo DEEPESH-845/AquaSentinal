@@ -10,10 +10,12 @@ import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
 import { Btn, CardHead, Chip, HindiNeedsMeta, Segmented, SourceTag, f1, human, pct, providerSource } from "./shared";
 
-/** Push-to-talk: hold to record (pointer or Space while focused), release to transcribe. Speech to text only. */
-function VoiceButton() {
+/** Push-to-talk: hold to record (pointer or Space while focused), release to transcribe. Speech to text only. `target`: where the transcript goes. */
+export function VoiceButton({ target = "instruction" }: { target?: "instruction" | "ask" }) {
   const voice = useMissionStore((s) => s.voice);
-  const live = useMissionStore((s) => s.system?.providers.voice.status === "LIVE");
+  const status = useMissionStore((s) => s.system?.providers.voice.status);
+  const live = status === "LIVE";
+  const typed = target === "ask" ? "Type the question instead." : "Type the instruction instead.";
   const { startVoice, stopVoice } = useMissionStore(useShallow((s) => ({ startVoice: s.startVoice, stopVoice: s.stopVoice })));
   const recording = voice.state === "RECORDING";
   const busy = voice.state === "TRANSCRIBING";
@@ -23,13 +25,13 @@ function VoiceButton() {
       type="button"
       disabled={!live || busy}
       aria-label={recording ? "Release to transcribe" : "Hold to talk"}
-      title={live ? "Hold to talk. Muse Voice Transcribe turns speech into text; it never speaks back." : "Voice needs MODEL_API_KEY on the backend. Type the instruction instead."}
+      title={live ? "Hold to talk. Muse Voice Transcribe turns speech into text; it never speaks back." : status === "LIVE_LOCKED" ? `Voice is locked until the passcode is entered. ${typed}` : `Voice needs MODEL_API_KEY on the backend. ${typed}`}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         void startVoice();
       }}
-      onPointerUp={() => void stopVoice()}
-      onPointerCancel={() => void stopVoice()}
+      onPointerUp={() => void stopVoice(target)}
+      onPointerCancel={() => void stopVoice(target)}
       onKeyDown={(e) => {
         if ((e.key === " " || e.key === "Enter") && !e.repeat && !recording) {
           e.preventDefault();
@@ -37,7 +39,7 @@ function VoiceButton() {
         }
       }}
       onKeyUp={(e) => {
-        if (e.key === " " || e.key === "Enter") void stopVoice();
+        if (e.key === " " || e.key === "Enter") void stopVoice(target);
       }}
       className={clsx("btn inline-flex shrink-0 items-center gap-1.5 select-none", recording && "border-danger! text-danger!", busy && "opacity-60")}
     >
@@ -137,7 +139,7 @@ function MissionStateStrip() {
   );
 }
 
-const LANGUAGES: Array<{ id: Language; text: string; title: string; lang?: string }> = [
+export const LANGUAGES: Array<{ id: Language; text: string; title: string; lang?: string }> = [
   { id: "en", text: "EN", title: "English" },
   { id: "hi", text: "हिन्दी", title: "Hindi: speak and read in Hindi (Meta models only)", lang: "hi" },
 ];
