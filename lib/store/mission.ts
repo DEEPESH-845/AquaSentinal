@@ -40,6 +40,8 @@ export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
 
 let interpretCtrl: AbortController | null = null;
 let statusInflight: { sent: string | null; done: Promise<void> } | null = null;
+/** Numbers the status reads. Only the newest may write: an older read that lands last would show the state from before an unlock or re-lock. */
+let statusSeq = 0;
 
 interface MissionStore {
   backend: BackendState;
@@ -96,8 +98,8 @@ interface MissionStore {
   loadReport: (missionId: string) => Promise<void>;
   loadHistory: () => Promise<void>;
   setUnlockOpen: (open: boolean) => void;
-  /** Checks a passcode with the backend and, if it works, keeps it for this tab. `error` is set when it did not. */
-  unlock: (passcode: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Checks a passcode with the backend and, if it works, keeps it for this tab. `error` is set when it did not; `blocked`: the attempt limit was hit, so the wait is in `unlockBlockedUntil`. */
+  unlock: (passcode: string) => Promise<{ ok: boolean; error?: string; blocked?: boolean }>;
   /** Forgets this tab's passcode, so live mode is locked again for this browser. */
   relock: () => void;
 }
@@ -154,13 +156,15 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     // rejected passcode is a failed attempt on the backend.
     const sent = getPasscode();
     if (statusInflight?.sent === sent) return statusInflight.done;
+    const seq = ++statusSeq;
     const entry: NonNullable<typeof statusInflight> = { sent, done: Promise.resolve() };
     entry.done = (async () => {
       try {
-        set({ system: await api.status(), backend: "ONLINE", lastStatusOkAt: Date.now() });
+        const system = await api.status();
+        if (seq === statusSeq) set({ system, backend: "ONLINE", lastStatusOkAt: Date.now() });
       } catch {
         // a stale status would keep showing providers LIVE behind an unreachable backend
-        set({ backend: "OFFLINE", system: null });
+        if (seq === statusSeq) set({ backend: "OFFLINE", system: null });
       } finally {
         if (statusInflight === entry) statusInflight = null;
       }
@@ -420,7 +424,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
       if (e instanceof ApiError && e.status === 429) {
         const wait = e.retryAfterS ?? 60;
         set({ unlockBlockedUntil: Date.now() + wait * 1000 });
-        return { ok: false, error: "Too many failed attempts." };
+        return { ok: false, blocked: true };
       }
       return { ok: false, error: msg(e) };
     }

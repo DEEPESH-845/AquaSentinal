@@ -47,9 +47,10 @@ export function setPasscode(code: string | null) {
 }
 
 /**
- * The backend counts a wrong passcode header as a failed attempt on every route (10 a minute per address, 30 global), so a
- * rejected passcode is forgotten the moment any response shows it was refused, and is never sent again. `refresh`: the
- * response did not carry fresh status, so the store should re-read it.
+ * The backend counts a wrong passcode header as a failed attempt on /api/system/status and on the Meta-calling routes (the
+ * `live_access` dependency: 10 a minute per address, 30 global); other routes ignore the header. So a rejected passcode is
+ * forgotten the moment a response shows it was refused, and is never sent again. `refresh`: the response did not carry fresh
+ * status, so the store should re-read it.
  */
 let onRejected: ((why: string, refresh: boolean) => void) | null = null;
 export const setRejectedHandler = (fn: typeof onRejected) => {
