@@ -35,7 +35,7 @@ from .mission.ask import AskService
 from .mission.service import MissionError, MissionService
 from .mission.workorders import WorkOrderService
 from .perception.pipeline import PerceptionPipeline
-from .perception.realwater import clean_prompts, segment_image
+from .perception.realwater import clean_prompts, frame_size, segment_image
 from .reporting import build_report, to_markdown
 from .schemas import (
     AskRequest,
@@ -328,9 +328,10 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
             raise HTTPException(422, str(e))
         jpeg = await read_frame(frame)
         try:
-            return await segment_image(S(request).sam, jpeg, prompts, live)
+            size = frame_size(jpeg)
         except ValueError as e:  # not a decodable image
             raise HTTPException(422, str(e))
+        return await segment_image(S(request).sam, jpeg, size, prompts, live)
 
     # ------------------------------------------------------------ missions
 

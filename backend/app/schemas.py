@@ -509,6 +509,8 @@ class RealSegmentResponse(Wire):
     model: str | None
     # every Meta execution this shutter cost or replayed
     execution_ids: list[str]
+    # how many of those were requests that actually went to Meta (LIVE_META or LIVE_META_FAILED); the rest were replayed from the cache
+    requests_sent: int
     # how the Meta calls behind the masks were made: LIVE_META, CACHED_LIVE, MOCKED ... None when none succeeded
     classification: str | None
     latency_ms: float | None  # the slowest phrase (they run side by side); None when every answer was replayed or none was asked

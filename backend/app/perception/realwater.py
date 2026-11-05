@@ -18,6 +18,9 @@ from .quality import decode
 
 MAX_PROMPT_CHARS = 60  # the same limit as SegmentRequest
 
+# Execution classes of a request that left for Meta, answered or not. A cache replay is an execution record too, but nothing was sent.
+SENT = ("LIVE_META", "LIVE_META_FAILED")
+
 NOTES = {
     "NO_KEY": "SAM 3.1 needs the Meta key: no MODEL_API_KEY is set, so no mask was drawn.",
     "LIVE_LOCKED": "SAM 3.1 needs the Meta key: live mode is locked, so no mask was drawn.",
@@ -47,13 +50,19 @@ async def _segment_one(sam: Sam, jpeg: bytes, prompt: str, width: int, height: i
     return RealSegment(prompt=prompt, status="OK" if out else "EMPTY", latency_ms=None if latency is None else round(latency, 1), error=None, instances=out)
 
 
-async def segment_image(sam: Sam | None, jpeg: bytes, prompts: list[str], live: bool) -> RealSegmentResponse:
-    """live=False is a locked request: it takes the no-key path even when a key is configured. Raises ValueError for an undecodable frame."""
+def frame_size(jpeg: bytes) -> tuple[int, int]:
+    """(width, height) of the frame. Raises ValueError when it is not a decodable image."""
     height, width = decode(jpeg).shape[:2]
+    return width, height
+
+
+async def segment_image(sam: Sam | None, jpeg: bytes, size: tuple[int, int], prompts: list[str], live: bool) -> RealSegmentResponse:
+    """live=False is a locked request: it takes the no-key path even when a key is configured."""
+    width, height = size
     if sam is None or not live:
         fallback = "NO_KEY" if sam is None else "LIVE_LOCKED"
         return RealSegmentResponse(
-            width=width, height=height, segments=[], provider="UNAVAILABLE", model=None, execution_ids=[], classification=None, latency_ms=None, cost_usd=0.0,
+            width=width, height=height, segments=[], provider="UNAVAILABLE", model=None, execution_ids=[], requests_sent=0, classification=None, latency_ms=None, cost_usd=0.0,
             fallback=fallback, note=NOTES[fallback],
         )
     ref = f"realcam sha1={hashlib.sha1(jpeg).hexdigest()[:10]}"
@@ -63,7 +72,7 @@ async def segment_image(sam: Sam | None, jpeg: bytes, prompts: list[str], live: 
     latencies = [s.latency_ms for s in segments if s.latency_ms is not None]
     return RealSegmentResponse(
         width=width, height=height, segments=list(segments), provider="SAM_3_1" if answered else "UNAVAILABLE", model=sam.model,
-        execution_ids=[e["id"] for e in executions], classification=_classify([e for e in executions if e["success"]]), latency_ms=max(latencies, default=None),
+        execution_ids=[e["id"] for e in executions], requests_sent=sum(e["classification"] in SENT for e in executions), classification=_classify([e for e in executions if e["success"]]), latency_ms=max(latencies, default=None),
         cost_usd=round(sum(e.get("costUsd") or 0.0 for e in executions if e["classification"] == "LIVE_META"), 6), fallback=None,
         note="" if answered else next((s.error for s in segments if s.error), ""),
     )
