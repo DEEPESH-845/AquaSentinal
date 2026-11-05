@@ -10,24 +10,78 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly detail?: unknown,
+    /** seconds the backend asked the caller to wait (429 Retry-After), when it said */
+    readonly retryAfterS?: number,
   ) {
     super(message);
   }
 }
 
-async function request<T>(path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+/**
+ * The live-mode passcode. Kept in sessionStorage so it survives a reload of this tab only, never in the URL or localStorage.
+ * The in-memory copy keeps a session working where storage is blocked (private windows, cleared site data).
+ */
+const PASSCODE_KEY = "aqua.passcode";
+let held: string | null | undefined; // undefined: storage not read yet
+
+export function getPasscode(): string | null {
+  if (typeof window === "undefined") return null;
+  if (held === undefined) {
+    try {
+      held = sessionStorage.getItem(PASSCODE_KEY);
+    } catch {
+      held = null;
+    }
+  }
+  return held;
+}
+
+export function setPasscode(code: string | null) {
+  held = code;
+  try {
+    if (code) sessionStorage.setItem(PASSCODE_KEY, code);
+    else sessionStorage.removeItem(PASSCODE_KEY);
+  } catch {
+    /* storage blocked: the in-memory copy still serves this page */
+  }
+}
+
+/**
+ * The backend counts a wrong passcode header as a failed attempt on every route (10 a minute per address, 30 global), so a
+ * rejected passcode is forgotten the moment any response shows it was refused, and is never sent again. `refresh`: the
+ * response did not carry fresh status, so the store should re-read it.
+ */
+let onRejected: ((why: string, refresh: boolean) => void) | null = null;
+export const setRejectedHandler = (fn: typeof onRejected) => {
+  onRejected = fn;
+};
+
+function forget(sent: string | null, why: string, refresh: boolean) {
+  if (!sent || getPasscode() !== sent) return; // nothing was sent, or a newer passcode has replaced it since
+  setPasscode(null);
+  onRejected?.(why, refresh);
+}
+
+async function request<T>(path: string, init: RequestInit & { timeoutMs?: number; anonymous?: boolean } = {}): Promise<T> {
+  const sent = init.anonymous ? null : getPasscode();
+  const headers = new Headers(init.headers);
+  if (sent) headers.set("X-Aqua-Passcode", sent);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), init.timeoutMs ?? 20_000);
   // a caller's signal (operator cancel) aborts the same request; the timeout still applies
   init.signal?.addEventListener("abort", () => ctrl.abort(), { once: true });
   try {
-    const res = await fetch(BACKEND_URL + path, { ...init, signal: ctrl.signal });
+    const res = await fetch(BACKEND_URL + path, { ...init, headers, signal: ctrl.signal });
     const text = await res.text();
     const body = text ? safeJson(text) : null;
     if (!res.ok) {
       const b = body as { error?: string; detail?: unknown } | null;
       const msg = typeof b?.error === "string" ? b.error : typeof b?.detail === "string" ? b.detail : `HTTP ${res.status}`;
-      throw new ApiError(msg, res.status, b?.detail);
+      // Only the unlock route answers 429 for the passcode throttle (and it is sent anonymously). Any other 429 is Meta rate limiting the
+      // backend, not a verdict on the passcode; a throttled address shows up in the status poll as locked, which forgets it there.
+      if (res.status === 403 && msg === "live mode locked") forget(sent, "The saved passcode was refused by the backend and has been forgotten.", true);
+      const wait = Number(res.headers.get("Retry-After"));
+      throw new ApiError(msg, res.status, b?.detail, Number.isFinite(wait) && wait > 0 ? wait : undefined);
     }
     return body as T;
   } catch (e) {
@@ -63,7 +117,16 @@ export interface TwinContext {
 
 export const api = {
   health: () => request<{ status: string; version: string }>("/api/health", { timeoutMs: 3000 }),
-  status: () => request<SystemStatus>("/api/system/status", { timeoutMs: 4000 }),
+  status: async () => {
+    const sent = getPasscode();
+    const status = await request<SystemStatus>("/api/system/status", { timeoutMs: 4000 });
+    // the backend has a lock and did not accept what was sent: it was wrong or changed, so stop sending it
+    // (`live` is optional at runtime: a backend from before the credit governor does not send it)
+    if (status.live?.lockEnabled && !status.live.unlocked) forget(sent, "The saved passcode no longer works and has been forgotten.", false);
+    return status;
+  },
+  /** Checks a passcode. Sent anonymously: an old stored passcode must not ride along and count as a second failed attempt. */
+  unlock: (passcode: string) => request<{ unlocked: boolean }>("/api/system/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ passcode }), timeoutMs: 6000, anonymous: true }),
   interpret: (instruction: string, context: TwinContext, offline = false, signal?: AbortSignal) =>
     post<InterpretResponse>(`/api/ai/interpret${offline ? "?offline=true" : ""}`, { instruction, context }, 90_000, signal),
   start: (id: string) => post<MissionRecord>(`/api/missions/${encodeURIComponent(id)}/start`, { executor: "TWIN" }),

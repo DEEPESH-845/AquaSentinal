@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { ApiError, api, type TwinContext } from "@/lib/api/client";
+import { ApiError, api, getPasscode, setPasscode, setRejectedHandler, type TwinContext } from "@/lib/api/client";
 import type { CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
 import { PushToTalk } from "@/lib/audio/wav";
 import { useSimStore } from "@/lib/sim/store";
@@ -39,6 +39,7 @@ export type TranscriptView = TranscriptResult & { source: VoiceInputSource };
 export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
 
 let interpretCtrl: AbortController | null = null;
+let statusInflight: { sent: string | null; done: Promise<void> } | null = null;
 
 interface MissionStore {
   backend: BackendState;
@@ -63,6 +64,12 @@ interface MissionStore {
   reportError: string | null;
   history: HistoryItem[];
   events: EventEnvelope[];
+  /** the unlock dialog is open */
+  unlockOpen: boolean;
+  /** why a saved passcode was forgotten, shown in the unlock dialog until a passcode works */
+  lockNotice: string | null;
+  /** wall-clock ms until which the backend refuses passcode attempts (429 Retry-After), or null */
+  unlockBlockedUntil: number | null;
 
   setBackend: (b: BackendState) => void;
   refreshStatus: () => Promise<void>;
@@ -88,6 +95,11 @@ interface MissionStore {
   finishMission: (result: MissionResult) => Promise<void>;
   loadReport: (missionId: string) => Promise<void>;
   loadHistory: () => Promise<void>;
+  setUnlockOpen: (open: boolean) => void;
+  /** Checks a passcode with the backend and, if it works, keeps it for this tab. `error` is set when it did not. */
+  unlock: (passcode: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Forgets this tab's passcode, so live mode is locked again for this browser. */
+  relock: () => void;
 }
 
 const MAX_CAPTURES = 60;
@@ -131,16 +143,30 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   reportError: null,
   history: [],
   events: [],
+  unlockOpen: false,
+  lockNotice: null,
+  unlockBlockedUntil: null,
 
   setBackend: (backend) => set({ backend }),
 
-  refreshStatus: async () => {
-    try {
-      set({ system: await api.status(), backend: "ONLINE", lastStatusOkAt: Date.now() });
-    } catch {
-      // a stale status would keep showing providers LIVE behind an unreachable backend
-      set({ backend: "OFFLINE", system: null });
-    }
+  refreshStatus: () => {
+    // Overlapping reads (mount, socket open, poll) share one request while the passcode is the same: each one that carries a
+    // rejected passcode is a failed attempt on the backend.
+    const sent = getPasscode();
+    if (statusInflight?.sent === sent) return statusInflight.done;
+    const entry: NonNullable<typeof statusInflight> = { sent, done: Promise.resolve() };
+    entry.done = (async () => {
+      try {
+        set({ system: await api.status(), backend: "ONLINE", lastStatusOkAt: Date.now() });
+      } catch {
+        // a stale status would keep showing providers LIVE behind an unreachable backend
+        set({ backend: "OFFLINE", system: null });
+      } finally {
+        if (statusInflight === entry) statusInflight = null;
+      }
+    })();
+    statusInflight = entry;
+    return entry.done;
   },
 
   onEvent: (e) => {
@@ -372,4 +398,43 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
       /* history is optional; the backend state chip already says why */
     }
   },
+
+  setUnlockOpen: (unlockOpen) => set({ unlockOpen }),
+
+  unlock: async (passcode) => {
+    try {
+      const { unlocked } = await api.unlock(passcode);
+      if (!unlocked) return { ok: false, error: "That passcode was not accepted." };
+      setPasscode(passcode);
+      // the status read proves it: if the backend still says locked, the client forgets the passcode again
+      await get().refreshStatus();
+      const live = get().system?.live;
+      if (live?.lockEnabled && !live.unlocked) {
+        set({ lockNotice: null });
+        return { ok: false, error: "The backend accepted the passcode, then refused it. Enter it again." };
+      }
+      set({ unlockOpen: false, lockNotice: null, unlockBlockedUntil: null });
+      void get().refreshEvidence();
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 429) {
+        const wait = e.retryAfterS ?? 60;
+        set({ unlockBlockedUntil: Date.now() + wait * 1000 });
+        return { ok: false, error: "Too many failed attempts." };
+      }
+      return { ok: false, error: msg(e) };
+    }
+  },
+
+  relock: () => {
+    setPasscode(null);
+    set({ unlockOpen: false, lockNotice: null });
+    void get().refreshStatus();
+  },
 }));
+
+// A rejected passcode is forgotten inside the API client; the store only explains it and re-reads the status.
+setRejectedHandler((why, refresh) => {
+  useMissionStore.setState({ lockNotice: why });
+  if (refresh) void useMissionStore.getState().refreshStatus();
+});

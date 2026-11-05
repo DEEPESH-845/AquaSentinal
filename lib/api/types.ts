@@ -4,7 +4,21 @@
  */
 import type { MissionPlan } from "@/lib/sim/types";
 
-export type ProviderStatus = { status: "LIVE" | "OFFLINE"; model: string; fallback: string | null };
+/** LIVE_LOCKED: a key is set but the operator has not entered the passcode, so the backend behaves as if there were no key. */
+export type ProviderStatus = { status: "LIVE" | "LIVE_LOCKED" | "OFFLINE"; model: string; fallback: string | null };
+
+/** Why a Meta call was skipped. Counted in memory by the backend's credit governor, so it restarts with the process. */
+export type SavedReason = "duplicate" | "unusable_quality" | "not_candidate" | "cache_hit" | "budget";
+
+/** Credit governor numbers. Cost is an estimate from Meta list prices, summed over LIVE_META executions only. */
+export interface Credits {
+  budgetUsd: number;
+  spentUsd: number;
+  remainingUsd: number;
+  liveCalls: number;
+  cachedCalls: number;
+  saved: { total: number; byReason: Record<SavedReason, number> };
+}
 
 export interface SystemStatus {
   version: string;
@@ -16,6 +30,9 @@ export interface SystemStatus {
   inference: { active: number; concurrency: number };
   gantry: { estop: boolean; fault: string | null; hardware: boolean; status: GantryStatus | null };
   camera: { source: string; online: boolean; lastFrameAgeS: number | null; resolution: string | null; error: string | null; verifiedHardware: boolean };
+  credits: Credits;
+  /** lockEnabled: the backend has a passcode. unlocked: this request carried it (always true when no passcode is set). */
+  live: { lockEnabled: boolean; unlocked: boolean };
   db: boolean;
 }
 
@@ -185,7 +202,11 @@ export interface ModelExecution {
   error: string | null;
   traceId: string | null;
   transport: "META_API" | "MOCK_TRANSPORT";
-  classification: "LIVE_META" | "LIVE_META_FAILED" | "MOCKED";
+  classification: "LIVE_META" | "LIVE_META_FAILED" | "MOCKED" | "CACHED_LIVE" | "CACHED_MOCKED" | "CACHED_UNVERIFIED";
+  /** USD estimate from list prices; 0 for a cache hit. Absent on records written before the credit governor existed. */
+  costUsd?: number;
+  /** a CACHED_* record points at the execution that produced the replayed answer */
+  cachedFrom?: string;
 }
 
 export interface ExecutionLog {

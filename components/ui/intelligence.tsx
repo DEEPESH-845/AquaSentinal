@@ -15,12 +15,15 @@ import { Btn, CardHead, Dot, pct } from "./shared";
  * LIVE_META only when the backend logged a successful request to the Meta API endpoint for that step.
  * HARDWARE_LIVE is never shown: no physical hardware event has been verified in this build.
  */
-export type ExecClass = "LIVE_META" | "LIVE_META_FAILED" | "MOCKED" | "SIMULATED" | "RECORDED_INPUT" | "LIVE_INPUT" | "OFFLINE_FALLBACK" | "DETERMINISTIC" | "NOT_RUN";
+export type ExecClass = "LIVE_META" | "LIVE_META_FAILED" | "MOCKED" | "CACHED_LIVE" | "CACHED_MOCKED" | "CACHED_UNVERIFIED" | "SIMULATED" | "RECORDED_INPUT" | "LIVE_INPUT" | "OFFLINE_FALLBACK" | "DETERMINISTIC" | "NOT_RUN";
 
 const EXEC_TEXT: Record<ExecClass, string> = {
   LIVE_META: "LIVE META",
   LIVE_META_FAILED: "LIVE CALL FAILED",
   MOCKED: "MOCKED",
+  CACHED_LIVE: "CACHED LIVE",
+  CACHED_MOCKED: "CACHED MOCKED",
+  CACHED_UNVERIFIED: "CACHED UNVERIFIED",
   SIMULATED: "SIMULATED",
   RECORDED_INPUT: "RECORDED INPUT",
   LIVE_INPUT: "LIVE MICROPHONE",
@@ -36,7 +39,9 @@ export function ExecTag({ c, className }: { c: ExecClass; className?: string }) 
       className={clsx(
         "sim-tag whitespace-nowrap",
         c === "LIVE_META" && "border-teal! bg-teal/15 text-teal!",
-        (c === "LIVE_META_FAILED" || c === "MOCKED") && "border-danger/70! text-danger!",
+        c === "CACHED_LIVE" && "border-teal/60! text-teal!",
+        (c === "LIVE_META_FAILED" || c === "MOCKED" || c === "CACHED_MOCKED") && "border-danger/70! text-danger!",
+        c === "CACHED_UNVERIFIED" && "border-amber/60! text-amber!",
         c === "OFFLINE_FALLBACK" && "border-amber/60! text-amber!",
         c === "NOT_RUN" && "opacity-60",
         className,
@@ -149,7 +154,7 @@ function ExecutionTable({ log }: { log: ExecutionLog | null }) {
       <div className="mb-1 flex items-center gap-2">
         <span className="label">Model execution log</span>
         <span className="value text-[10px] text-dim">
-          {log ? `live ok ${counts.LIVE_META ?? 0}, live failed ${counts.LIVE_META_FAILED ?? 0}, mocked ${counts.MOCKED ?? 0}` : "backend unreachable"}
+          {log ? `live ok ${counts.LIVE_META ?? 0}, live failed ${counts.LIVE_META_FAILED ?? 0}, mocked ${counts.MOCKED ?? 0}, cached ${(counts.CACHED_LIVE ?? 0) + (counts.CACHED_MOCKED ?? 0) + (counts.CACHED_UNVERIFIED ?? 0)}` : "backend unreachable"}
         </span>
       </div>
       {rows.length === 0 ? (
