@@ -38,6 +38,9 @@ const TONE: Record<CreditState, { text: string; bar: string; border: string }> =
   EXHAUSTED: { text: "text-danger!", bar: "bg-danger", border: "border-danger/60! hover:border-danger" },
 };
 
+/** Spoken form of the state, first in the chip's accessible name so it is not left to colour alone. */
+const STATE_ARIA: Record<CreditState, string> = { UNKNOWN: "unknown", NO_KEY: "no key", OK: "within budget", WARN: "warning, over 80 percent", EXHAUSTED: "cap reached" };
+
 const STATE_TAG: Record<CreditState, string> = { UNKNOWN: "UNKNOWN", NO_KEY: "NO KEY", OK: "WITHIN BUDGET", WARN: "OVER 80%", EXHAUSTED: "CAP REACHED" };
 
 /** What each skipped-call counter means, in the words an operator needs. */
@@ -63,7 +66,7 @@ export function useCredits() {
 }
 
 function summary(state: CreditState, c: Credits | undefined) {
-  if (!c || state === "UNKNOWN") return "Credits unknown until the backend answers";
+  if (!c || state === "UNKNOWN") return "The backend has not answered, so spend is unknown";
   if (state === "NO_KEY") return `No MODEL_API_KEY, so no credits can be spent. Budget cap ${usd(c.budgetUsd, 2)}`;
   return `${usd(c.spentUsd)} of ${usd(c.budgetUsd, 2)} spent (estimate from Meta list prices). ${c.liveCalls} live, ${c.cachedCalls} cached, ${c.saved.total} saved`;
 }
@@ -72,7 +75,7 @@ function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div>
       <dt className="label whitespace-nowrap text-[9px] text-dim">
-        {label} <span className="max-[379px]:sr-only">calls</span>
+        {label} <span className="max-[380px]:sr-only">calls</span>
       </dt>
       <dd className="value mt-0.5 text-[15px] leading-none text-text">{value}</dd>
     </div>
@@ -103,8 +106,8 @@ function CreditPopover({ id, state, credits: c, lock, onClose, onLock }: { id: s
       </div>
 
       {lock !== "OPEN" && (
-        // Below 600 px the header has no AI chip, so the lock is managed from here.
-        <div className={clsx("mb-3 flex items-center justify-between gap-3 border px-2.5 py-2 min-[600px]:hidden", lock === "LOCKED" ? "border-amber/40 bg-amber/[0.06]" : "border-line")} data-testid="credits-lock-row">
+        // The row is shown wherever the header draws no AI chip (locked: below 600 px; unlocked: below 999 px), so the lock can always be changed from here.
+        <div className={clsx("mb-3 flex items-center justify-between gap-3 border px-2.5 py-2", lock === "LOCKED" ? "border-amber/40 bg-amber/[0.06] min-[600px]:hidden" : "border-line min-[999px]:hidden")} data-testid="credits-lock-row">
           <span className={clsx("flex items-center gap-1.5 text-[12px] leading-snug", lock === "LOCKED" ? "text-amber" : "text-muted")}>
             {lock === "LOCKED" ? <Lock size={12} aria-hidden /> : <LockOpen size={12} aria-hidden />}
             {lock === "LOCKED" ? "Live mode is locked" : "Live mode is unlocked"}
@@ -158,8 +161,9 @@ function CreditPopover({ id, state, credits: c, lock, onClose, onLock }: { id: s
 
 /**
  * Header credit chip: spent against budget with a thin bar, and a click-open popover with the detail.
- * At 1600 px and up it reads `CREDITS $0.042 / $1.00`; below that it collapses to an icon and the amount, below 520 px to the icon and the bar.
- * Below 600 px the AI chip is gone, so a locked chip shows a lock and its popover carries the unlock button.
+ * At 1280 px and up it reads `CREDITS $0.042 / $1.00`; below that it collapses to an icon and the amount, below 520 px to the icon and the bar.
+ * The popover carries the lock and unlock button wherever the header draws no AI chip.
+ * Tailwind 4 reads `max-[N]` as "narrower than N", so every show and hide pair here uses the same N as its `min-[N]`.
  */
 export function CreditChip() {
   const { credits: c, state } = useCredits();
@@ -203,20 +207,20 @@ export function CreditChip() {
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? popId : undefined}
-        aria-label={`${summary(state, c)}.${locked ? " Live mode is locked." : ""} ${open ? "Hide" : "Show"} details`}
+        aria-label={`Credits ${STATE_ARIA[state]}. ${summary(state, c)}.${locked ? " Live mode is locked." : ""} ${open ? "Hide" : "Show"} details`}
         title={`${summary(state, c)}. Click for details.`}
         onClick={() => setOpen((o) => !o)}
-        className={clsx("relative flex min-h-[25px] shrink-0 items-center gap-1.5 border border-line bg-ground/40 px-2 py-1 transition-colors duration-150 max-[519px]:px-1.5", tone.border, open && "border-line-strong bg-panel-2/60")}
+        className={clsx("relative flex min-h-[25px] shrink-0 items-center gap-1.5 border border-line bg-ground/40 px-2 py-1 transition-colors duration-150 max-[520px]:px-1.5", tone.border, open && "border-line-strong bg-panel-2/60")}
       >
-        <span className="flex max-[1599px]:hidden">
+        <span className="flex max-[1280px]:hidden">
           <Dot tone={state === "OK" ? "teal" : state === "WARN" ? "amber" : state === "EXHAUSTED" ? "danger" : "dim"} />
         </span>
         {locked && <Lock size={12} className="text-amber! min-[600px]:hidden" aria-hidden />}
-        <CircleDollarSign size={12} className={clsx("min-[1600px]:hidden", locked && "max-[599px]:hidden", tone.text)} aria-hidden />
-        <span className="label text-text max-[1599px]:hidden">Credits</span>
-        <span className={clsx("label text-[9px] whitespace-nowrap max-[519px]:hidden", state === "WARN" || state === "EXHAUSTED" ? tone.text : state === "OK" ? "text-text!" : "text-dim!")} data-testid="credits-value">
+        <CircleDollarSign size={12} className={clsx("min-[1280px]:hidden", locked && "max-[600px]:hidden", tone.text)} aria-hidden />
+        <span className="label text-text max-[1280px]:hidden">Credits</span>
+        <span className={clsx("label text-[9px] whitespace-nowrap max-[520px]:hidden", state === "WARN" || state === "EXHAUSTED" ? tone.text : state === "OK" ? "text-text!" : "text-dim!")} data-testid="credits-value">
           {value}
-          {wide && <span className="text-dim max-[1599px]:hidden">{wide}</span>}
+          {wide && <span className="text-dim max-[1280px]:hidden">{wide}</span>}
         </span>
         <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-line">
           <span className={clsx("block h-full transition-[width] duration-300", tone.bar)} style={{ width: `${frac * 100}%` }} />
@@ -322,7 +326,8 @@ export function UnlockDialog() {
     setBusy(false);
     setNow(Date.now());
     if (!r.ok) {
-      setError(r.error ?? "That passcode was not accepted.");
+      // a refusal for too many attempts is shown by the countdown, which ends with it; no message is left behind
+      setError(r.blocked ? null : (r.error ?? "That passcode was not accepted."));
       setCode(""); // a rejected guess is not kept in the field
       input.current?.focus();
     }

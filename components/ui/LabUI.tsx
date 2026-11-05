@@ -255,8 +255,10 @@ function StatusChip({
   const inner = (
     <>
       {icon ?? <Dot tone={tone} pulse={pulse} />}
-      {/* the name is spoken, not drawn, below 1500 px: the value says what the chip is, and the header has no room for both */}
-      <span className={clsx("label text-text max-[1499px]:sr-only", hide)}>{name}</span>
+      {/* The name is spoken, not drawn, below 1600 px: the value says what the chip is, and the header needs the room for the full
+          credit chip (from 1280 px). Header thresholds, all "narrower than N" in Tailwind 4: chip names 1600, full credit chip 1280,
+          MISSION CONTROL label 1440. */}
+      <span className={clsx("label text-text max-[1600px]:sr-only", hide)}>{name}</span>
       <span className={clsx("label text-[9px]", valueClass ?? "text-dim", hide)}>{value}</span>
     </>
   );
@@ -287,7 +289,7 @@ function AiChip() {
         valueClass="text-amber!"
         icon={<Lock size={11} className="text-amber" aria-hidden />}
         collapse
-        className="border-amber/50! hover:border-amber max-[599px]:hidden"
+        className="border-amber/50! hover:border-amber max-[600px]:hidden"
         onClick={() => open(true)}
         title="Live mode is locked: Meta calls need the passcode, so labelled offline fallbacks run. Click to unlock."
       />
@@ -344,8 +346,8 @@ function TopBar() {
     <header data-lab="header" className="pointer-events-none absolute inset-x-0 top-0 z-30 flex h-12 items-center justify-between gap-4 border-b border-line bg-ground/70 px-4 backdrop-blur-[2px] max-[999px]:relative max-[999px]:shrink-0 max-[439px]:gap-2 max-[439px]:px-3">
       <div className="pointer-events-auto flex min-w-0 items-center gap-4 overflow-hidden">
         <span className="whitespace-nowrap font-mono text-[13px] font-semibold tracking-[0.28em] text-text max-[439px]:tracking-[0.12em] max-[379px]:text-[11px] max-[379px]:tracking-[0.04em]">AQUASENTINAL</span>
-        <span className="h-4 w-px bg-line-strong max-[1279px]:hidden" />
-        <span className="label whitespace-nowrap text-teal max-[1279px]:hidden">Mission control</span>
+        <span className="h-4 w-px bg-line-strong max-[1440px]:hidden" />
+        <span className="label whitespace-nowrap text-teal max-[1440px]:hidden">Mission control</span>
         <Link href="/walkthrough" className="label whitespace-nowrap transition-colors hover:text-text max-[1099px]:hidden">
           Walkthrough
         </Link>
@@ -353,7 +355,7 @@ function TopBar() {
           <Compass size={12} /> Guide
         </button>
       </div>
-      <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 max-[1199px]:gap-1 max-[599px]:[&_.btn]:px-2">
+      <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 max-[1200px]:gap-1 max-[600px]:[&_.btn]:px-2">
         {/* secondary status, dropped below 1000 px so the brand always has room. Unknown is grey, never green. */}
         <div className="contents max-[999px]:hidden">
           <StatusChip name="Mode" value={sys?.mode ?? "UNKNOWN"} tone={!sys ? "dim" : sys.hardwareActive ? "amber" : "teal"} title={sys ? `Backend reports ${sys.mode}` : "Backend status not read yet"} />
@@ -361,7 +363,7 @@ function TopBar() {
         </div>
         <AiChip />
         <CreditChip />
-        <span className="mx-1 h-5 w-px bg-line max-[1199px]:hidden" />
+        <span className="mx-1 h-5 w-px bg-line max-[1200px]:hidden" />
         <button
           type="button"
           className="btn btn-icon max-[999px]:hidden"
@@ -374,8 +376,8 @@ function TopBar() {
           {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
         <Btn primary onClick={startDemo} disabled={demoActive} label={demoActive ? "Demo running" : "Run demo"}>
-          <Play size={14} /> <span className="max-[519px]:hidden">{demoActive ? "Demo running" : "Run demo"}</span>
-          <span className="min-[520px]:hidden max-[379px]:hidden">Demo</span>
+          <Play size={14} /> <span className="max-[520px]:hidden">{demoActive ? "Demo running" : "Run demo"}</span>
+          <span className="min-[520px]:hidden max-[380px]:hidden">Demo</span>
         </Btn>
         <Btn onClick={reset} disabled={demoActive} label="Reset lab">
           <RotateCcw size={14} /> <span className="max-[759px]:hidden">Reset</span>
