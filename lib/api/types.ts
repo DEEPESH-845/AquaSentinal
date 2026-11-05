@@ -78,6 +78,9 @@ export interface ToolCallRecord {
   at: number;
 }
 
+/** The operator's language for Meta-written text and for Voice Transcribe's language bias. Offline output is English whatever it is. */
+export type Language = "en" | "hi";
+
 export interface MissionRecord {
   id: string;
   createdAt: number;
@@ -92,6 +95,8 @@ export interface MissionRecord {
   timeline: ToolCallRecord[];
   result: Record<string, unknown> | null;
   executor: "TWIN" | "BACKEND" | null;
+  /** the operator's language when the mission was planned; its summary is written in it */
+  language: Language;
 }
 
 export interface InterpretResponse {
@@ -261,7 +266,7 @@ export interface ReportPathPoint {
 export interface InspectionReport {
   reportVersion: number;
   generatedAt: number;
-  mission: { id: string; instruction: string; provider: Provider; createdAt: number; spec: MissionSpec; planSummary: MissionRecord["planSummary"]; executor: string | null };
+  mission: { id: string; instruction: string; provider: Provider; createdAt: number; spec: MissionSpec; planSummary: MissionRecord["planSummary"]; executor: string | null; language: Language };
   outcome: { status: MissionRecord["status"]; twinResult: Record<string, number | string | boolean> | null; waypointsPlanned: number; waypointsVisited: number | null };
   path: ReportPathPoint[];
   assets: ReportAsset[];

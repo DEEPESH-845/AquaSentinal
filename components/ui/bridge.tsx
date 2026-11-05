@@ -17,6 +17,7 @@ import { useMissionStore } from "@/lib/store/mission";
 export function BackendBridge() {
   useEffect(() => {
     const ms = useMissionStore.getState();
+    ms.loadLanguage();
     void ms.refreshStatus();
     void ms.refreshEvidence();
     const timer = setInterval(() => {

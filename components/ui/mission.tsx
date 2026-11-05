@@ -4,11 +4,11 @@ import clsx from "clsx";
 import { Check, Mic, Pause, Play, Square, Wand2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import type { MissionRecord, ToolCallRecord } from "@/lib/api/types";
+import type { Language, MissionRecord, ToolCallRecord } from "@/lib/api/types";
 import { DEMO_INSTRUCTION } from "@/lib/sim/demo";
 import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
-import { Btn, CardHead, Chip, SourceTag, f1, human, pct, providerSource } from "./shared";
+import { Btn, CardHead, Chip, HindiNeedsMeta, Segmented, SourceTag, f1, human, pct, providerSource } from "./shared";
 
 /** Push-to-talk: hold to record (pointer or Space while focused), release to transcribe. Speech to text only. */
 function VoiceButton() {
@@ -137,12 +137,20 @@ function MissionStateStrip() {
   );
 }
 
+const LANGUAGES: Array<{ id: Language; text: string; title: string; lang?: string }> = [
+  { id: "en", text: "EN", title: "English" },
+  { id: "hi", text: "हिन्दी", title: "Hindi: speak and read in Hindi (Meta models only)", lang: "hi" },
+];
+
 function Composer() {
   const { instruction, interpreting, interpretError, canFallBack, voice, mission } = useMissionStore(
     useShallow((s) => ({ instruction: s.instruction, interpreting: s.interpreting, interpretError: s.interpretError, canFallBack: s.canFallBack, voice: s.voice, mission: s.mission })),
   );
   const { setInstruction, interpret } = useMissionStore(useShallow((s) => ({ setInstruction: s.setInstruction, interpret: s.interpret })));
+  const language = useMissionStore((s) => s.language);
+  const setLanguage = useMissionStore((s) => s.setLanguage);
   const sparkLive = useMissionStore((s) => s.system?.providers.spark.status === "LIVE");
+  const voiceLive = useMissionStore((s) => s.system?.providers.voice.status === "LIVE");
   const backend = useMissionStore((s) => s.backend);
   const running = useSimStore((s) => s.mode === "MISSION");
   // a plan under review or a mission in progress owns the box; a finished one must not block the next instruction
@@ -181,6 +189,11 @@ function Composer() {
           )}
         </div>
       )}
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="label">Language</span>
+        <Segmented label="Instruction language" options={LANGUAGES} value={language} onChange={setLanguage} />
+        <HindiNeedsMeta offline={!sparkLive || !voiceLive} />
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <VoiceButton />
         <Btn primary onClick={() => void interpret()} disabled={locked || backend === "OFFLINE" || instruction.trim().length < 3}>
@@ -258,8 +271,13 @@ function PlanReview({ m }: { m: MissionRecord }) {
         <Chip active tone={m.status === "PLANNED" ? "amber" : "teal"}>
           {m.status}
         </Chip>
+        <HindiNeedsMeta offline={m.provider !== "MUSE_SPARK"} />
       </div>
-      {m.explanation && <p className="mb-2 text-[12px] leading-snug text-muted">{m.explanation}</p>}
+      {m.explanation && (
+        <p lang={m.provider === "MUSE_SPARK" && m.language === "hi" ? "hi" : undefined} className="mb-2 text-[12px] leading-snug text-muted">
+          {m.explanation}
+        </p>
+      )}
       {m.warnings.length > 0 && (
         <ul className="mb-2 space-y-0.5">
           {m.warnings.map((w) => (

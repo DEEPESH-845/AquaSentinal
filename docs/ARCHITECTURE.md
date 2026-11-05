@@ -97,5 +97,8 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
   The backend counts a wrong passcode header as a failed attempt on `/api/system/status` and the Meta-calling routes, so the client forgets it as soon as the status read shows the lock refused it, or a model route answers 403 `live mode locked`, and then stops sending it.
   Overlapping status reads share one request so a stale passcode costs one attempt, not several, and only the newest read may write the status, so a slow read from before an unlock or re-lock cannot overwrite it.
   A 429 on any other route is Meta rate limiting the backend and does not touch the passcode.
+- The operator language (`en` or `hi`, default `en`) is `language` in `useMissionStore`, chosen with the EN | हिन्दी control in AI mission control and remembered in `localStorage` under `aqua.language` (read after mount; a blocked storage leaves the choice for the page only).
+  It is sent as `language` on Voice Transcribe and planning requests, and only Meta models honour it.
+  Wherever the output came from the offline parser or a template while Hindi is selected, the UI says `Hindi needs Meta models`: those paths stay English.
 - `components/ui/credits.tsx` holds the header credit chip with its popover and the unlock dialog.
   Every figure comes from the `credits` object of the status; the popover carries the lock and unlock button wherever the header draws no AI chip (locked: below 600 px, unlocked: below 999 px).

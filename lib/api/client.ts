@@ -1,7 +1,7 @@
 /**
  * Typed client for the AquaSentinal backend. The browser never talks to Meta: every model call goes through these routes.
  */
-import type { CaptureResult, ExecutionLog, HistoryItem, InspectionReport, InterpretResponse, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "./types";
+import type { CaptureResult, ExecutionLog, HistoryItem, InspectionReport, InterpretResponse, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "./types";
 
 export const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -128,8 +128,8 @@ export const api = {
   },
   /** Checks a passcode. Sent anonymously: an old stored passcode must not ride along and count as a second failed attempt. */
   unlock: (passcode: string) => request<{ unlocked: boolean }>("/api/system/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ passcode }), timeoutMs: 6000, anonymous: true }),
-  interpret: (instruction: string, context: TwinContext, offline = false, signal?: AbortSignal) =>
-    post<InterpretResponse>(`/api/ai/interpret${offline ? "?offline=true" : ""}`, { instruction, context }, 90_000, signal),
+  interpret: (instruction: string, context: TwinContext, offline = false, signal?: AbortSignal, language: Language = "en") =>
+    post<InterpretResponse>(`/api/ai/interpret${offline ? "?offline=true" : ""}`, { instruction, context, language }, 90_000, signal),
   start: (id: string) => post<MissionRecord>(`/api/missions/${encodeURIComponent(id)}/start`, { executor: "TWIN" }),
   pause: (id: string) => post<MissionRecord>(`/api/missions/${encodeURIComponent(id)}/pause`),
   resume: (id: string) => post<MissionRecord>(`/api/missions/${encodeURIComponent(id)}/resume`),
@@ -140,10 +140,11 @@ export const api = {
   history: () => request<HistoryItem[]>("/api/inspection/history"),
   preflight: () => request<Preflight>("/api/system/preflight", { timeoutMs: 4000 }),
   executions: (limit = 50) => request<ExecutionLog>(`/api/evidence/model-executions?limit=${limit}`, { timeoutMs: 4000 }),
-  transcribe: (wav: Blob, inputSource: VoiceInputSource = "LIVE_MICROPHONE") => {
+  transcribe: (wav: Blob, inputSource: VoiceInputSource = "LIVE_MICROPHONE", language: Language = "en") => {
     const form = new FormData();
     form.append("audio", wav, "command.wav");
     form.append("inputSource", inputSource);
+    form.append("language", language);
     return request<TranscriptResult>("/api/voice/transcribe", { method: "POST", body: form, timeoutMs: 60_000 });
   },
   command: (type: "ESTOP" | "CLEAR_ESTOP" | "STOP") =>

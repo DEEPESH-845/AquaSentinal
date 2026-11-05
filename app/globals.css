@@ -21,8 +21,8 @@
   --color-danger: #f16f70;
   --color-ok: #59d5a0;
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-inter), var(--font-devanagari), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), var(--font-devanagari), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* motion tokens, shared with lib/animations/motion.ts */
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);

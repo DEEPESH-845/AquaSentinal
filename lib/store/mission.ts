@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { ApiError, api, getPasscode, setPasscode, setRejectedHandler, type TwinContext } from "@/lib/api/client";
-import type { CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
+import type { CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
 import { PushToTalk } from "@/lib/audio/wav";
 import { useSimStore } from "@/lib/sim/store";
 import type { CaptureRequest, MissionResult } from "@/lib/sim/types";
@@ -38,6 +38,9 @@ export type TranscriptView = TranscriptResult & { source: VoiceInputSource };
 /** Prepared audio of the demo instruction (synthetic speech, macOS `say`). Always labelled RECORDED_INPUT. */
 export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
 
+/** Where this browser remembers the operator's language. localStorage: per viewer, across tabs and visits. */
+export const LANGUAGE_KEY = "aqua.language";
+
 let interpretCtrl: AbortController | null = null;
 let statusInflight: { sent: string | null; done: Promise<void> } | null = null;
 /** Numbers the status reads. Only the newest may write: an older read that lands last would show the state from before an unlock or re-lock. */
@@ -50,6 +53,8 @@ interface MissionStore {
   /** wall-clock ms of the last successful status read */
   lastStatusOkAt: number | null;
   instruction: string;
+  /** the operator's language for voice, plans and summaries; "en" until loadLanguage has read this browser's choice */
+  language: Language;
   voice: VoiceState;
   transcript: TranscriptView | null;
   preflight: Preflight | null;
@@ -77,6 +82,9 @@ interface MissionStore {
   refreshStatus: () => Promise<void>;
   onEvent: (e: EventEnvelope) => void;
   setInstruction: (s: string) => void;
+  setLanguage: (l: Language) => void;
+  /** Reads the saved language once the page is mounted (the server render and the first client render are both "en"). */
+  loadLanguage: () => void;
   startVoice: () => Promise<void>;
   stopVoice: () => Promise<void>;
   /** Sends the prepared recording through Voice Transcribe. Returns the transcript, or null with voice.error set. */
@@ -130,6 +138,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   lastStatusOkAt: null,
   system: null,
   instruction: "",
+  language: "en",
   voice: { state: "IDLE" },
   transcript: null,
   preflight: null,
@@ -184,6 +193,24 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
 
   setInstruction: (instruction) => set({ instruction }),
 
+  setLanguage: (language) => {
+    set({ language });
+    try {
+      localStorage.setItem(LANGUAGE_KEY, language);
+    } catch {
+      /* storage blocked: the choice still holds for this page */
+    }
+  },
+
+  loadLanguage: () => {
+    try {
+      const saved = localStorage.getItem(LANGUAGE_KEY);
+      if (saved === "en" || saved === "hi") set({ language: saved });
+    } catch {
+      /* storage blocked: English, or whatever was chosen on this page */
+    }
+  },
+
   startVoice: async () => {
     if (!recorder || !PushToTalk.supported()) {
       set({ voice: { state: "ERROR", error: "This browser cannot record audio. Type the instruction instead." } });
@@ -202,7 +229,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     set({ voice: { state: "TRANSCRIBING" } });
     try {
       const wav = await recorder.stop();
-      const r = await api.transcribe(wav, "LIVE_MICROPHONE");
+      const r = await api.transcribe(wav, "LIVE_MICROPHONE", get().language);
       set({ instruction: r.transcript, transcript: { ...r, source: "LIVE_MICROPHONE" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
     } catch (e) {
       recorder.cancel();
@@ -215,7 +242,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     try {
       const res = await fetch(RECORDED_INSTRUCTION_URL);
       if (!res.ok) throw new Error(`recorded instruction missing (HTTP ${res.status})`);
-      const r = await api.transcribe(await res.blob(), "RECORDED_INPUT");
+      const r = await api.transcribe(await res.blob(), "RECORDED_INPUT", get().language);
       set({ instruction: r.transcript, transcript: { ...r, source: "RECORDED_INPUT" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
       void get().refreshEvidence();
       return r.transcript;
@@ -240,7 +267,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     const ctrl = (interpretCtrl = new AbortController());
     set({ interpreting: true, interpretError: null, canFallBack: false, actionError: null });
     try {
-      const r = await api.interpret(text, twinContext(), offline, ctrl.signal);
+      const r = await api.interpret(text, twinContext(), offline, ctrl.signal, get().language);
       set({ mission: r.mission, interpreting: false });
       void get().refreshEvidence();
       return r.mission;

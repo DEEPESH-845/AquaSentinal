@@ -6,6 +6,7 @@ import { gsap } from "@/lib/animations/gsap";
 import { DUR, EASE, prefersReducedMotion } from "@/lib/animations/motion";
 import { useSimStore } from "@/lib/sim/store";
 import type { DetectedClass } from "@/lib/sim/types";
+import { useMissionStore } from "@/lib/store/mission";
 
 export const f1 = (n: number) => n.toFixed(1);
 export const f2 = (n: number) => n.toFixed(2);
@@ -44,6 +45,20 @@ export function SourceTag({ source, className }: { source: Source; className?: s
 /** Maps backend provider strings onto a SourceTag. */
 export const providerSource = (p: string | null | undefined): Source =>
   p === "MUSE_SPARK" ? "MUSE_SPARK" : p === "SAM_3_1" ? "SAM_3_1" : p === "OPERATOR" ? "OPERATOR" : p === "TEMPLATE_FROM_RECORDS" ? "TEMPLATE" : p === "OFFLINE_FIXTURE" ? "TWIN_TRUTH" : p === "SIM_DETECTOR" ? "SIM_DETECTOR" : "OFFLINE";
+
+/**
+ * Beside output that did not come from a Meta model, while Hindi is selected: offline parsers and templates are English only
+ * and are never machine-translated. `offline` is true for anything but a live Meta answer (no key, locked, template, fallback).
+ */
+export function HindiNeedsMeta({ offline, className }: { offline: boolean; className?: string }) {
+  const hindi = useMissionStore((s) => s.language === "hi");
+  if (!hindi || !offline) return null;
+  return (
+    <span data-testid="hindi-needs-meta" title="This output is English. Hindi voice, plans and summaries are written by the Meta models." className={clsx("value text-[10px] text-amber", className)}>
+      Hindi needs Meta models
+    </span>
+  );
+}
 
 const DOT_BG = { teal: "bg-teal", amber: "bg-amber", danger: "bg-danger", dim: "bg-dim" } as const;
 
@@ -188,7 +203,20 @@ export function Btn({
  * Single-choice control. The selection indicator glides to the chosen option (GSAP), so the eye follows the change.
  * Arrow keys move the choice, as a radio group should.
  */
-export function Segmented<T extends string>({ options, value, onChange, label, className }: { options: Array<{ id: T; text: string; title?: string }>; value: T; onChange: (v: T) => void; label: string; className?: string }) {
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  label,
+  className,
+}: {
+  /** `lang` marks an option written in another language, so assistive tech reads it with the right voice */
+  options: Array<{ id: T; text: string; title?: string; lang?: string }>;
+  value: T;
+  onChange: (v: T) => void;
+  label: string;
+  className?: string;
+}) {
   const root = useRef<HTMLDivElement>(null);
   const ind = useRef<HTMLSpanElement>(null);
   const first = useRef(true);
@@ -217,6 +245,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, c
           aria-checked={o.id === value}
           tabIndex={o.id === value ? 0 : -1}
           data-seg={o.id}
+          lang={o.lang}
           title={o.title}
           onClick={() => onChange(o.id)}
           onKeyDown={(e) => {

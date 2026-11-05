@@ -8,7 +8,7 @@ import type { InspectionReport } from "@/lib/api/types";
 import { GANTRY } from "@/lib/sim/constants";
 import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
-import { Btn, CardHead, SourceTag, f1, f2, human, isTargetClass, pad2, pct, providerSource } from "./shared";
+import { Btn, CardHead, HindiNeedsMeta, SourceTag, f1, f2, human, isTargetClass, pad2, pct, providerSource } from "./shared";
 import { C } from "@/lib/theme";
 
 const MAP_W = 300;
@@ -187,6 +187,7 @@ export function ReportCard() {
   }
 
   const s = r.summary;
+  const summaryLang = s.provider === "MUSE_SPARK" && r.mission.language === "hi" ? "hi" : undefined; // only Meta writes Hindi; templates are English
   const replay = () => {
     const plan = mission?.id === r.mission.id ? mission.plan : null;
     if (plan && useSimStore.getState().runMission(plan, true)) useSimStore.getState().setScene(4);
@@ -222,12 +223,17 @@ export function ReportCard() {
         <div className="min-w-0">
           <div className="mb-1 flex items-center justify-between gap-2">
             <span className="label text-dim">Summary</span>
-            <SourceTag source={providerSource(s.provider)} />
+            <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+              <HindiNeedsMeta offline={s.provider !== "MUSE_SPARK"} />
+              <SourceTag source={providerSource(s.provider)} />
+            </span>
           </div>
-          <p className="text-[12px] leading-snug text-text">{s.summary}</p>
+          <p lang={summaryLang} className="text-[12px] leading-snug text-text">
+            {s.summary}
+          </p>
           {s.error && <p className="mt-0.5 text-[10px] text-dim">{s.error}</p>}
           {s.limitations.length > 0 && (
-            <ul className="mt-1 list-disc pl-4">
+            <ul lang={summaryLang} className="mt-1 list-disc pl-4">
               {s.limitations.map((l) => (
                 <li key={l} className="text-[11px] leading-snug text-muted">
                   {l}
