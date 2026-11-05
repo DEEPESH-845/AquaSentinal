@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { ChevronDown, ChevronUp, Compass, Maximize2, Minimize2, OctagonX, Play, RotateCcw } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Compass, Lock, LockOpen, Maximize2, Minimize2, OctagonX, Play, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -11,10 +11,12 @@ import { useSimStore, type SceneId } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
 import { BackendBridge } from "./bridge";
 import { CameraFeed } from "./CameraFeed";
+import { CreditChip, UnlockDialog, useLiveLock } from "./credits";
 import { IntelligenceCard, OriginTag } from "./intelligence";
 import { MissionCard } from "./mission";
 import { DemoCard, VisionMoment } from "./overlays";
 import { PerceptionCard } from "./perception";
+import { RealWaterDialog } from "./realcam";
 import { ReportCard } from "./report";
 import { EnvironmentCard, GantryCard, OverviewCard, SystemCard } from "./scenes";
 import { Btn, Dot } from "./shared";
@@ -67,6 +69,8 @@ export function LabUI() {
   const showVision = useSimStore((s) => s.showVision);
   const panels = useSimStore((s) => s.panels);
   const setScene = useSimStore((s) => s.setScene);
+  const unlockOpen = useMissionStore((s) => s.unlockOpen);
+  const [camOpen, setCamOpen] = useState(false);
   const visionColumnWidth = useVisionColumnWidth();
   const columnWidth = scene === 3 ? visionColumnWidth : 300;
 
@@ -74,7 +78,7 @@ export function LabUI() {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const s = useSimStore.getState();
-      if (s.demo.active || s.showVision || s.tourStep !== null) return;
+      if (s.demo.active || s.showVision || s.tourStep !== null || useMissionStore.getState().unlockOpen) return;
       const cur = s.scene;
       if (e.key === "ArrowDown" || e.key === "ArrowRight") s.setScene(Math.min(8, cur + 1) as SceneId);
       else if (e.key === "ArrowUp" || e.key === "ArrowLeft") s.setScene(Math.max(1, cur - 1) as SceneId);
@@ -101,7 +105,7 @@ export function LabUI() {
         className="pointer-events-none absolute inset-0 select-none overflow-hidden max-[999px]:flex max-[999px]:flex-col"
         style={{ "--col-w": `${columnWidth}px` } as React.CSSProperties}
       >
-        <TopBar />
+        <TopBar onCamera={() => setCamOpen(true)} />
 
         {/* left rail: scene index. Below 1000 px it is a horizontal strip directly above the card. */}
         <nav
@@ -214,6 +218,8 @@ export function LabUI() {
         </div>
 
         <AnimatePresence>{showVision && <VisionMoment key="vision" />}</AnimatePresence>
+        <AnimatePresence>{camOpen && <RealWaterDialog key="realcam" onClose={() => setCamOpen(false)} />}</AnimatePresence>
+        <AnimatePresence>{unlockOpen && <UnlockDialog key="unlock" />}</AnimatePresence>
       </div>
       <Tour />
       <BackendBridge />
@@ -221,13 +227,98 @@ export function LabUI() {
   );
 }
 
-function StatusChip({ name, value, tone, title, pulse }: { name: string; value: string; tone: "teal" | "amber" | "danger" | "dim"; title?: string; pulse?: boolean }) {
-  return (
-    <span className="flex items-center gap-1.5 border border-line bg-ground/40 px-2 py-1" data-testid={`chip-${name.toLowerCase()}`} title={title}>
-      <Dot tone={tone} pulse={pulse} />
-      <span className="label text-text">{name}</span>
-      <span className="label text-[9px] text-dim">{value}</span>
+function StatusChip({
+  name,
+  value,
+  tone,
+  title,
+  pulse,
+  icon,
+  valueClass,
+  onClick,
+  className,
+  collapse,
+}: {
+  name: string;
+  value: string;
+  tone: "teal" | "amber" | "danger" | "dim";
+  title?: string;
+  pulse?: boolean;
+  /** replaces the status dot */
+  icon?: React.ReactNode;
+  valueClass?: string;
+  /** makes the chip a button */
+  onClick?: () => void;
+  className?: string;
+  /** below 1000 px only the icon stays; the button keeps its full name for assistive technology */
+  collapse?: boolean;
+}) {
+  const hide = collapse && "max-[999px]:hidden";
+  const cls = clsx("flex min-h-[25px] shrink-0 items-center gap-1.5 border border-line bg-ground/40 px-2 py-1", collapse && "max-[999px]:px-1.5", className);
+  const inner = (
+    <>
+      {icon ?? <Dot tone={tone} pulse={pulse} />}
+      {/* The name is spoken, not drawn, below 1600 px: the value says what the chip is, and the header needs the room for the full
+          credit chip (from 1280 px). Header thresholds, all "narrower than N" in Tailwind 4: chip names 1600, full credit chip 1280,
+          MISSION CONTROL label 1440. The camera button is always drawn, so below 1200 the focus toggle gives way to it, the Run demo word
+          appears from 760 and the E-stop word from 380 (the icons keep their accessible names and titles). */}
+      <span className={clsx("label text-text max-[1600px]:sr-only", hide)}>{name}</span>
+      <span className={clsx("label text-[9px]", valueClass ?? "text-dim", hide)}>{value}</span>
+    </>
+  );
+  const id = `chip-${name.toLowerCase()}`;
+  return onClick ? (
+    <button type="button" onClick={onClick} className={clsx(cls, "transition-colors duration-150")} data-testid={id} title={title} aria-label={`${name} ${value}. ${title ?? ""}`.trim()}>
+      {inner}
+    </button>
+  ) : (
+    <span className={cls} data-testid={id} title={title}>
+      {inner}
     </span>
+  );
+}
+
+/** AI provider chip. When live mode is locked it is the way in to the unlock dialog, at every width. */
+function AiChip() {
+  const sys = useMissionStore((s) => s.system);
+  const lock = useLiveLock();
+  const open = useMissionStore((s) => s.setUnlockOpen);
+  const ai = sys?.providers.spark.status === "LIVE";
+  if (lock === "LOCKED")
+    return (
+      <StatusChip
+        name="AI"
+        value="LIVE LOCKED"
+        tone="amber"
+        valueClass="text-amber!"
+        icon={<Lock size={11} className="text-amber" aria-hidden />}
+        collapse
+        className="border-amber/50! hover:border-amber max-[600px]:hidden"
+        onClick={() => open(true)}
+        title="Live mode is locked: Meta calls need the passcode, so labelled offline fallbacks run. Click to unlock."
+      />
+    );
+  if (lock === "UNLOCKED" && ai)
+    return (
+      <StatusChip
+        name="AI"
+        value="META LIVE"
+        tone="teal"
+        icon={<LockOpen size={11} className="text-teal" aria-hidden />}
+        collapse
+        className="max-[999px]:hidden hover:border-line-strong"
+        onClick={() => open(true)}
+        title="Muse Spark reachable with a key; this tab holds the passcode. Click to lock again."
+      />
+    );
+  return (
+    <StatusChip
+      name="AI"
+      value={!sys ? "UNKNOWN" : ai ? "META LIVE" : "OFFLINE"}
+      tone={!sys ? "dim" : ai ? "teal" : "amber"}
+      className="max-[999px]:hidden"
+      title={!sys ? "Provider status unknown until the backend answers" : ai ? "Muse Spark reachable with a key" : "No MODEL_API_KEY: labelled offline fallbacks"}
+    />
   );
 }
 
@@ -239,29 +330,28 @@ function EstopButton() {
   const where = twin && backend ? "the digital twin and the backend motion controller" : twin ? "the digital twin" : "the backend motion controller";
   return twin || backend ? (
     <Btn onClick={clearEstop} className="border-danger! text-danger!" title={`Emergency stop is latched on ${where}. Clear it to allow motion again.`}>
-      <OctagonX size={14} /> Clear e-stop
+      <OctagonX size={14} /> <span className="max-[379px]:sr-only">Clear<span className="max-[1099px]:sr-only"> e-stop</span></span>
     </Btn>
   ) : (
     <Btn danger onClick={emergencyStop} label="Emergency stop" title="Stop all motion now">
-      <OctagonX size={14} /> E-stop
+      <OctagonX size={14} /> <span className="max-[379px]:sr-only">E-stop</span>
     </Btn>
   );
 }
 
-function TopBar() {
+function TopBar({ onCamera }: { onCamera: () => void }) {
   const demoActive = useSimStore((s) => s.demo.active);
   const focus = useSimStore((s) => !s.panels.card && !s.panels.telemetry);
   const { startDemo, reset, setPanels, setTourStep } = useSimStore(useShallow((s) => ({ startDemo: s.startDemo, reset: s.reset, setPanels: s.setPanels, setTourStep: s.setTourStep })));
   const backend = useMissionStore((s) => s.backend);
   const sys = useMissionStore((s) => s.system);
-  const ai = sys?.providers.spark.status === "LIVE";
 
   return (
-    <header data-lab="header" className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center justify-between gap-4 border-b border-line bg-ground/70 px-4 backdrop-blur-[2px] max-[999px]:static max-[999px]:shrink-0 max-[439px]:gap-2 max-[439px]:px-3">
+    <header data-lab="header" className="pointer-events-none absolute inset-x-0 top-0 z-30 flex h-12 items-center justify-between gap-4 border-b border-line bg-ground/70 px-4 backdrop-blur-[2px] max-[999px]:relative max-[999px]:shrink-0 max-[439px]:gap-2 max-[439px]:px-3">
       <div className="pointer-events-auto flex min-w-0 items-center gap-4 overflow-hidden">
         <span className="whitespace-nowrap font-mono text-[13px] font-semibold tracking-[0.28em] text-text max-[439px]:tracking-[0.12em] max-[379px]:text-[11px] max-[379px]:tracking-[0.04em]">AQUASENTINAL</span>
-        <span className="h-4 w-px bg-line-strong max-[1279px]:hidden" />
-        <span className="label whitespace-nowrap text-teal max-[1279px]:hidden">Mission control</span>
+        <span className="h-4 w-px bg-line-strong max-[1440px]:hidden" />
+        <span className="label whitespace-nowrap text-teal max-[1440px]:hidden">Mission control</span>
         <Link href="/walkthrough" className="label whitespace-nowrap transition-colors hover:text-text max-[1099px]:hidden">
           Walkthrough
         </Link>
@@ -269,17 +359,30 @@ function TopBar() {
           <Compass size={12} /> Guide
         </button>
       </div>
-      <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 max-[379px]:gap-1 max-[379px]:[&_.btn]:px-2">
+      <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 max-[1200px]:gap-1 max-[600px]:[&_.btn]:px-2">
         {/* secondary status, dropped below 1000 px so the brand always has room. Unknown is grey, never green. */}
         <div className="contents max-[999px]:hidden">
           <StatusChip name="Mode" value={sys?.mode ?? "UNKNOWN"} tone={!sys ? "dim" : sys.hardwareActive ? "amber" : "teal"} title={sys ? `Backend reports ${sys.mode}` : "Backend status not read yet"} />
           <StatusChip name="Backend" value={backend} tone={backend === "ONLINE" ? "teal" : backend === "OFFLINE" ? "danger" : "dim"} pulse={backend === "ONLINE"} title="Polled every 5 s and on every event socket reconnect" />
-          <StatusChip name="AI" value={!sys ? "UNKNOWN" : ai ? "META LIVE" : "OFFLINE"} tone={!sys ? "dim" : ai ? "teal" : "amber"} title={!sys ? "Provider status unknown until the backend answers" : ai ? "Muse Spark reachable with a key" : "No MODEL_API_KEY: labelled offline fallbacks"} />
-          <span className="mx-1 h-5 w-px bg-line" />
         </div>
+        <AiChip />
+        <CreditChip />
+        <span className="mx-1 h-5 w-px bg-line max-[1200px]:hidden" />
         <button
           type="button"
-          className="btn btn-icon max-[999px]:hidden"
+          className="btn btn-icon"
+          onClick={onCamera}
+          disabled={demoActive}
+          aria-haspopup="dialog"
+          aria-label="Real water camera"
+          title="Real water camera: segment a phone or laptop camera frame with SAM 3.1"
+          data-testid="realcam-open"
+        >
+          <Camera size={14} />
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon max-[1200px]:hidden"
           onClick={() => setPanels({ card: focus, telemetry: focus })}
           aria-pressed={focus}
           aria-label={focus ? "Show panels" : "Focus the 3D view"}
@@ -289,8 +392,7 @@ function TopBar() {
           {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
         <Btn primary onClick={startDemo} disabled={demoActive} label={demoActive ? "Demo running" : "Run demo"}>
-          <Play size={14} /> <span className="max-[439px]:hidden">{demoActive ? "Demo running" : "Run demo"}</span>
-          <span className="min-[440px]:hidden">Demo</span>
+          <Play size={14} /> <span className="max-[759px]:hidden">{demoActive ? "Demo running" : "Run demo"}</span>
         </Btn>
         <Btn onClick={reset} disabled={demoActive} label="Reset lab">
           <RotateCcw size={14} /> <span className="max-[759px]:hidden">Reset</span>

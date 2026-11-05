@@ -67,7 +67,7 @@ const COMPONENTS: { id: ComponentId; name: string; text: string }[] = [
   { id: "test-objects", name: "Inspection targets", text: "Loose cable, rope offcut, dropped wrench, crate, concrete panel, rocks." },
 ];
 
-type ServiceStatus = "LIVE" | "OFFLINE" | "ON" | "OFF" | "UNKNOWN";
+type ServiceStatus = "LIVE" | "LIVE_LOCKED" | "OFFLINE" | "ON" | "OFF" | "UNKNOWN";
 
 /** One dependency. UNKNOWN (not checked, or the backend that would check it is unreachable) is grey, never green. */
 function Service({ name, status, detail }: { name: string; status: ServiceStatus; detail: string }) {
@@ -82,7 +82,7 @@ function Service({ name, status, detail }: { name: string; status: ServiceStatus
           {detail}
         </span>
       </span>
-      <span className={clsx("label text-[9px]", unknown ? "text-dim" : on ? "text-teal" : "text-amber")}>{status}</span>
+      <span className={clsx("label text-[9px]", unknown ? "text-dim" : on ? "text-teal" : "text-amber")}>{status.replace("_", " ")}</span>
     </div>
   );
 }
@@ -101,6 +101,8 @@ export function SystemCard() {
   const p = sys?.providers;
   const known = !!sys;
   const metaLive = preflight?.checks.find((c) => c.id === "meta_live");
+  /** Detail line for a model provider: what it does when live, and what stands in when it is locked or offline. */
+  const model = (status: string, live: string, off: string) => (status === "LIVE" ? live : status === "LIVE_LOCKED" ? `locked until the passcode is entered: ${off}` : `offline: ${off}`);
   const hw = sys?.gantry.status;
   return (
     <div>
@@ -112,9 +114,9 @@ export function SystemCard() {
           status={!metaLive ? "UNKNOWN" : metaLive.ok ? "LIVE" : "OFFLINE"}
           detail={metaLive ? metaLive.detail : "not checked: backend preflight has not answered"}
         />
-        <Service name="Muse Spark 1.3" status={known ? p!.spark.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : p!.spark.status === "LIVE" ? "mission planning, frame reasoning, summaries" : "offline: labelled keyword parser"} />
-        <Service name="SAM 3.1" status={known ? p!.sam.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : p!.sam.status === "LIVE" ? "text-prompted masks" : "offline: twin-geometry outlines"} />
-        <Service name="Voice Transcribe" status={known ? p!.voice.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : p!.voice.status === "LIVE" ? "push-to-talk speech to text" : "offline: type instead"} />
+        <Service name="Muse Spark 1.3" status={known ? p!.spark.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : model(p!.spark.status, "mission planning, frame reasoning, summaries", "labelled keyword parser")} />
+        <Service name="SAM 3.1" status={known ? p!.sam.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : model(p!.sam.status, "text-prompted masks", "twin-geometry outlines")} />
+        <Service name="Voice Transcribe" status={known ? p!.voice.status : "UNKNOWN"} detail={!known ? "unknown until the backend answers" : model(p!.voice.status, "push-to-talk speech to text", "type instead")} />
         <Service name="Camera" status={!known ? "UNKNOWN" : sys!.camera.online ? "ON" : "OFF"} detail={known ? `${sys!.camera.source.replace(/_/g, " ").toLowerCase()}${sys!.camera.resolution ? ` ${sys!.camera.resolution}` : ""}` : "unknown"} />
         <Service
           name="Gantry driver"

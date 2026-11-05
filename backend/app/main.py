@@ -14,10 +14,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from .config import Settings, load_settings
 from .db import Repository
@@ -27,23 +27,34 @@ from .hardware.camera import CameraManager
 from .hardware.drivers import DriverFault, SerialGantryDriver, SimulatedGantryDriver, open_serial
 from .hardware.motion import InterlockError, MotionController
 from .meta.client import MetaAPIError, MetaClient
+from .meta.governor import Governor, LiveLocked, client_ip, live_access
 from .meta.sam import Sam
 from .meta.spark import Spark
 from .meta.voice import Voice
+from .mission.ask import AskService
 from .mission.service import MissionError, MissionService
+from .mission.workorders import WorkOrderService
 from .perception.pipeline import PerceptionPipeline
+from .perception.realwater import clean_prompts, frame_size, segment_image
 from .reporting import build_report, to_markdown
 from .schemas import (
+    AskRequest,
+    AskResponse,
     CaptureMeta,
     CommandEnvelope,
     InterpretRequest,
     InterpretResponse,
+    Language,
     MissionSpec,
     ObservationCreate,
+    RealSegmentResponse,
     SegmentRequest,
     StartRequest,
+    SummaryRequest,
     TranscriptResult,
     TwinMissionResult,
+    WorkOrdersRequest,
+    WorkOrdersResponse,
 )
 
 VERSION = "1.0.0"
@@ -53,11 +64,24 @@ MAX_FRAME_BYTES = 4 * 1024 * 1024
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
+async def read_frame(upload: UploadFile) -> bytes:
+    """The uploaded frame, or 413 when it is missing, empty or over MAX_FRAME_BYTES. One check for every route that takes a frame."""
+    jpeg = await upload.read(MAX_FRAME_BYTES + 1)
+    if not jpeg or len(jpeg) > MAX_FRAME_BYTES:
+        raise HTTPException(413, "frame missing or larger than 4 MB")
+    return jpeg
+
+
+class UnlockBody(BaseModel):
+    passcode: str = Field("", max_length=256)
+
+
 @dataclass
 class Services:
     settings: Settings
     repo: Repository
     events: EventBus
+    governor: Governor
     meta: MetaClient | None
     spark: Spark | None
     sam: Sam | None
@@ -66,6 +90,8 @@ class Services:
     motion: MotionController
     camera: CameraManager
     missions: MissionService
+    asker: AskService
+    work_orders: WorkOrderService
     sim_driver: SimulatedGantryDriver | None
     started_at: float
 
@@ -73,11 +99,12 @@ class Services:
 def build_services(settings: Settings, meta_transport=None, serial_factory=None) -> Services:
     repo = Repository(settings.sqlite_path, settings.data_dir)
     events = EventBus()
+    governor = Governor(repo, settings.meta_budget_usd, settings.live_passcode)
     meta = spark = sam = voice = None
     if settings.meta_available:
         meta = MetaClient(
             settings.model_api_key, settings.meta_base_url, timeout_s=settings.request_timeout_s, max_retries=settings.max_retries,
-            transport=meta_transport, on_execution=repo.save_execution,
+            transport=meta_transport, on_execution=repo.save_execution, governor=governor,
         )
         spark, sam, voice = Spark(meta, settings.spark_model), Sam(meta, settings.sam_model), Voice(meta, settings.voice_model)
     hardware = settings.app_mode == "HARDWARE" and settings.hardware_enable and bool(settings.serial_port or serial_factory)
@@ -88,13 +115,13 @@ def build_services(settings: Settings, meta_transport=None, serial_factory=None)
         driver = sim_driver = SimulatedGantryDriver()
     motion = MotionController(driver, events, hardware=hardware)
     camera = CameraManager(settings.camera_device if settings.app_mode == "HARDWARE" else "")
-    pipeline = PerceptionPipeline(settings, repo, events, spark, sam)
+    pipeline = PerceptionPipeline(settings, repo, events, spark, sam, governor)
 
     async def hw_status() -> dict:
         return motion.snapshot()
 
     missions = MissionService(repo, events, spark, pipeline, hw_status)
-    return Services(settings, repo, events, meta, spark, sam, voice, pipeline, motion, camera, missions, sim_driver, time.time())
+    return Services(settings, repo, events, governor, meta, spark, sam, voice, pipeline, motion, camera, missions, AskService(repo, spark), WorkOrderService(repo, spark), sim_driver, time.time())
 
 
 def create_app(settings: Settings | None = None, *, meta_transport=None, serial_factory=None) -> FastAPI:
@@ -138,6 +165,7 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         allow_origin_regex=settings.cors_origin_regex or None,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Retry-After"],  # the browser may show how long the passcode throttle lasts
     )
 
     def S(request: Request) -> Services:
@@ -152,6 +180,10 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         status = e.status if 400 <= e.status < 600 else 502
         return JSONResponse({"error": str(e), "detail": e.public()}, status_code=status)
 
+    @app.exception_handler(LiveLocked)
+    async def _live_locked(_: Request, __: LiveLocked):
+        return JSONResponse({"error": "live mode locked"}, status_code=403)
+
     @app.exception_handler(InterlockError)
     async def _interlock(_: Request, e: InterlockError):
         return JSONResponse({"error": str(e), "interlock": True}, status_code=409)
@@ -163,30 +195,40 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         s = S(request)
         return {"status": "ok", "version": VERSION, "db": s.repo.ping(), "uptimeS": round(time.time() - s.started_at, 1)}
 
-    def providers(s: Services) -> dict[str, Any]:
-        live = "LIVE" if s.meta else "OFFLINE"
+    def providers(s: Services, unlocked: bool) -> dict[str, Any]:
+        live = "OFFLINE" if not s.meta else "LIVE" if unlocked else "LIVE_LOCKED"
         return {
-            "spark": {"status": live, "model": settings.spark_model, "fallback": None if s.meta else "OFFLINE_RULE_PARSER"},
-            "sam": {"status": live, "model": settings.sam_model, "fallback": None if s.meta else "SIM_DETECTOR + OFFLINE_FIXTURE masks"},
-            "voice": {"status": live, "model": settings.voice_model, "fallback": None if s.meta else "text input"},
+            "spark": {"status": live, "model": settings.spark_model, "fallback": None if live == "LIVE" else "OFFLINE_RULE_PARSER"},
+            "sam": {"status": live, "model": settings.sam_model, "fallback": None if live == "LIVE" else "SIM_DETECTOR + OFFLINE_FIXTURE masks"},
+            "voice": {"status": live, "model": settings.voice_model, "fallback": None if live == "LIVE" else "text input"},
         }
 
     @app.get("/api/system/status")
-    async def system_status(request: Request):
+    async def system_status(request: Request, live: bool = Depends(live_access)):
         s = S(request)
         return {
             "version": VERSION,
             "mode": settings.app_mode,
             "hardwareEnabled": settings.hardware_enable,
             "hardwareActive": s.motion.hardware,
-            "providers": providers(s),
+            "providers": providers(s, live),
             "usage": s.meta.usage.snapshot() if s.meta else {},
+            "credits": s.governor.credits(),
+            "live": {"lockEnabled": s.governor.lock_enabled, "unlocked": live},
             "inference": {"active": s.pipeline.queue.active, "concurrency": settings.sam_concurrency},
             "gantry": s.motion.snapshot(),
             "camera": s.camera.status(),
             "db": s.repo.ping(),
             "eventSubscribers": s.events.subscribers,
         }
+
+    @app.post("/api/system/unlock")
+    async def unlock(request: Request, body: UnlockBody):
+        """Checks a passcode so the browser can tell the operator whether it will work. The browser then sends it as X-Aqua-Passcode."""
+        unlocked, limited = S(request).governor.unlock(body.passcode, client_ip(request))
+        if limited:
+            return JSONResponse({"error": "too many passcode attempts; try again in a minute", "unlocked": False}, status_code=429, headers={"Retry-After": "60"})
+        return {"unlocked": unlocked}
 
     @app.get("/api/system/config")
     async def system_config():
@@ -229,30 +271,36 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
     # ------------------------------------------------------------ voice and AI
 
     @app.post("/api/voice/transcribe", response_model=TranscriptResult)
-    async def transcribe(request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource")):
+    async def transcribe(
+        request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource"), language: Language = Form("en"), live: bool = Depends(live_access)
+    ):
         s = S(request)
         if input_source not in ("LIVE_MICROPHONE", "RECORDED_INPUT"):
             raise HTTPException(422, "inputSource must be LIVE_MICROPHONE or RECORDED_INPUT")
-        if s.voice is None:
+        if s.voice is None:  # before the lock: unlocking cannot help without a key
             raise HTTPException(503, "Muse Voice Transcribe is unavailable: MODEL_API_KEY is not configured. Type the instruction instead.")
+        if not live:
+            raise LiveLocked()
         data = await audio.read(MAX_AUDIO_BYTES + 1)
         if not data or len(data) > MAX_AUDIO_BYTES:
             raise HTTPException(413, "audio missing or larger than 10 MB (about five minutes)")
-        body, latency = await s.voice.transcribe(data, ref=f"audio:{input_source} sha1={hashlib.sha1(data).hexdigest()[:10]}")
+        body, latency = await s.voice.transcribe(data, ref=f"audio:{input_source} sha1={hashlib.sha1(data).hexdigest()[:10]}", language=language)
         return TranscriptResult(
             transcript=str(body.get("transcript", "")), provider="MUSE_VOICE_TRANSCRIBE", model=settings.voice_model,
-            session_id=str(body.get("sessionId", "")), audio_duration_ms=int(body.get("audioDurationMs") or 0), latency_ms=round(latency, 1),
+            session_id=str(body.get("sessionId", "")), audio_duration_ms=int(body.get("audioDurationMs") or 0), latency_ms=None if latency is None else round(latency, 1),
         )
 
     @app.post("/api/ai/interpret", response_model=InterpretResponse)
-    async def interpret(request: Request, body: InterpretRequest, offline: bool = Query(False, description="force the labelled offline parser")):
+    async def interpret(request: Request, body: InterpretRequest, offline: bool = Query(False, description="force the labelled offline parser"), live: bool = Depends(live_access)):
         s = S(request)
-        mission, model = await s.missions.interpret(body, force_offline=offline)
+        mission, model = await s.missions.interpret(body, force_offline=offline, live=live)
         return InterpretResponse(mission=mission, provider=mission.provider, model=model)
 
     @app.post("/api/ai/segment")
-    async def segment(request: Request, body: SegmentRequest):
+    async def segment(request: Request, body: SegmentRequest, live: bool = Depends(live_access)):
         s = S(request)
+        if not live:
+            raise LiveLocked()
         cap = s.repo.get_capture(body.capture_id)
         if cap is None:
             raise HTTPException(404, "capture not found")
@@ -270,6 +318,20 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         seg = await s.pipeline._segment_one(meta, cap["id"], jpeg, img_w, img_h, ids, {"phrase": body.prompt, "target_class": None})
         s.repo.save_segmentation(seg)
         return seg.model_dump(by_alias=True)
+
+    @app.post("/api/ai/segment-image", response_model=RealSegmentResponse)
+    async def segment_real_image(request: Request, frame: UploadFile = File(...), prompt: list[str] = Form(...), live: bool = Depends(live_access)):
+        """SAM 3.1 on one camera frame, one request per prompt (one or two). A keyless or locked backend still answers, saying so, and sends nothing."""
+        try:
+            prompts = clean_prompts(prompt)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        jpeg = await read_frame(frame)
+        try:
+            size = frame_size(jpeg)
+        except ValueError as e:  # not a decodable image
+            raise HTTPException(422, str(e))
+        return await segment_image(S(request).sam, jpeg, size, prompts, live)
 
     # ------------------------------------------------------------ missions
 
@@ -307,28 +369,26 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         app.post(f"/api/missions/{{mission_id}}/{action}", name=f"mission_{action}")(handler)
 
     @app.post("/api/missions/{mission_id}/complete")
-    async def complete(request: Request, mission_id: str, result: TwinMissionResult):
-        return (await S(request).missions.complete(mission_id, result)).model_dump(by_alias=True)
+    async def complete(request: Request, mission_id: str, result: TwinMissionResult, live: bool = Depends(live_access)):
+        return (await S(request).missions.complete(mission_id, result, live)).model_dump(by_alias=True)
 
     # ------------------------------------------------------------ inspection
 
     @app.post("/api/inspection/capture")
-    async def capture(request: Request, meta: str = Form(...), frame: UploadFile = File(...), idmask: UploadFile | None = File(None)):
+    async def capture(request: Request, meta: str = Form(...), frame: UploadFile = File(...), idmask: UploadFile | None = File(None), live: bool = Depends(live_access)):
         s = S(request)
         try:
             m = CaptureMeta.model_validate_json(meta)
         except ValidationError as e:
             raise HTTPException(422, e.errors(include_url=False, include_context=False))
-        jpeg = await frame.read(MAX_FRAME_BYTES + 1)
-        if not jpeg or len(jpeg) > MAX_FRAME_BYTES:
-            raise HTTPException(413, "frame missing or larger than 4 MB")
+        jpeg = await read_frame(frame)
         ids = await idmask.read(MAX_FRAME_BYTES + 1) if idmask else None
         if ids and len(ids) > MAX_FRAME_BYTES:
             raise HTTPException(413, "id mask larger than 4 MB")
         w, h = capture_size()
         s.camera.push(jpeg, w, h)
         try:
-            result = await s.pipeline.process(m, jpeg, ids)
+            result = await s.pipeline.process(m, jpeg, ids, live)
         except ValueError as e:
             raise HTTPException(422, str(e))
         return result.model_dump(by_alias=True)
@@ -389,8 +449,18 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         return r
 
     @app.post("/api/inspection/{mission_id}/summary")
-    async def regenerate_summary(request: Request, mission_id: str):
-        return await S(request).missions.summarize(mission_id)
+    async def regenerate_summary(request: Request, mission_id: str, body: SummaryRequest | None = None, live: bool = Depends(live_access)):
+        return await S(request).missions.summarize(mission_id, live, body.language if body else None)
+
+    @app.post("/api/inspection/{mission_id}/ask", response_model=AskResponse)
+    async def ask(request: Request, mission_id: str, body: AskRequest, live: bool = Depends(live_access)):
+        """Grounded Q&A over one mission's stored records: Muse Spark through read-only tools, else the labelled offline records query."""
+        return await S(request).asker.ask(mission_id, body.question, body.language, live)
+
+    @app.post("/api/inspection/{mission_id}/work-orders", response_model=WorkOrdersResponse)
+    async def work_orders(request: Request, mission_id: str, body: WorkOrdersRequest, live: bool = Depends(live_access)):
+        """Work orders for one mission, grounded in its stored captures: Muse Spark structured output, else the labelled offline rule table."""
+        return await S(request).work_orders.generate(mission_id, body.language, live)
 
     # ------------------------------------------------------------ gantry and telemetry
 

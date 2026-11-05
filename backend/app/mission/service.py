@@ -17,7 +17,7 @@ from ..meta.client import MetaAPIError
 from ..meta.spark import PlanningFailed, Spark
 from ..perception.pipeline import PerceptionPipeline
 from ..reporting import build_report, template_summary
-from ..schemas import InterpretRequest, MissionRecord, MissionSpec, Provider, ToolCallRecord, TwinContext, TwinMissionResult
+from ..schemas import InterpretRequest, Language, MissionRecord, MissionSpec, Provider, ToolCallRecord, TwinContext, TwinMissionResult
 from .compiler import PlanError, compile_plan
 from .offline import parse_instruction
 from .tools import CreateMissionArgs, NoArgs, ToolRegistry
@@ -66,34 +66,38 @@ class MissionService:
             mid, n = f"{base[:40]}-{n}", n + 1
         return mid
 
-    async def _store(self, instruction: str, provider: Provider, spec: MissionSpec, explanation: str, timeline: list[ToolCallRecord], warnings: list[str]) -> MissionRecord:
+    async def _store(
+        self, instruction: str, provider: Provider, spec: MissionSpec, explanation: str, timeline: list[ToolCallRecord], warnings: list[str], language: Language = "en"
+    ) -> MissionRecord:
         try:
             plan, summary = compile_plan(spec)
         except PlanError as e:
             raise MissionError(422, str(e)) from e
         m = MissionRecord(
             id=spec.mission_id, created_at=time.time(), instruction=instruction, provider=provider, status="PLANNED",
-            spec=spec, plan=plan, plan_summary=summary, explanation=explanation, warnings=warnings, timeline=timeline,
+            spec=spec, plan=plan, plan_summary=summary, explanation=explanation, warnings=warnings, timeline=timeline, language=language,
         )
         self.repo.save_mission(m)
         await self.events.publish("mission.planned", {"missionId": m.id, "provider": provider, "planSummary": summary.model_dump(by_alias=True)})
         return m
 
-    async def interpret(self, req: InterpretRequest, force_offline: bool = False) -> tuple[MissionRecord, str | None]:
+    async def interpret(self, req: InterpretRequest, force_offline: bool = False, live: bool = True) -> tuple[MissionRecord, str | None]:
+        """live=False is a locked request: the labelled offline parser answers, as when no key is set."""
         ctx = req.context
-        if self.spark is not None and not force_offline:
-            return await self._interpret_spark(req.instruction, ctx), self.spark.model
+        if self.spark is not None and live and not force_offline:
+            return await self._interpret_spark(req.instruction, ctx, req.language), self.spark.model
         spec, notes = parse_instruction(req.instruction)
         spec = spec.model_copy(update={"mission_id": self._unique_id(spec.mission_id)})
         record = ToolCallRecord(
             name="create_inspection_mission", arguments=spec.model_dump(by_alias=True, exclude={"mission_id"}), ok=True,
             result={"missionId": spec.mission_id}, phase="PLANNING", by="OFFLINE_RULE_PARSER", at=time.time(),
         )
-        warnings = ["Interpreted by the offline keyword parser, not by Muse Spark: set MODEL_API_KEY for language understanding.", *notes]
+        why = "live mode is locked" if self.spark is not None and not live else "set MODEL_API_KEY for language understanding"
+        warnings = [f"Interpreted by the offline keyword parser, not by Muse Spark: {why}.", *notes]
         explanation = "Keyword rules mapped the instruction to the fields below. Review them before approving."
-        return await self._store(req.instruction, "OFFLINE_RULE_PARSER", spec, explanation, [record], warnings), None
+        return await self._store(req.instruction, "OFFLINE_RULE_PARSER", spec, explanation, [record], warnings, req.language), None
 
-    async def _interpret_spark(self, instruction: str, ctx: TwinContext | None) -> MissionRecord:
+    async def _interpret_spark(self, instruction: str, ctx: TwinContext | None, language: Language = "en") -> MissionRecord:
         assert self.spark is not None
         created: dict[str, MissionSpec] = {}
         registry = ToolRegistry()
@@ -127,13 +131,14 @@ class MissionService:
         registry.bind("get_camera_status", camera)
         registry.bind("create_inspection_mission", create)
         try:
-            outcome = await self.spark.plan(instruction, registry, ref=f"instruction:sha1={hashlib.sha1(instruction.encode()).hexdigest()[:10]} chars={len(instruction)}")
+            ref = f"instruction:sha1={hashlib.sha1(instruction.encode()).hexdigest()[:10]} chars={len(instruction)} lang={language}"
+            outcome = await self.spark.plan(instruction, registry, ref=ref, language=language)
         except PlanningFailed as e:
             raise MissionError(502, str(e), {"timeline": [t.model_dump(by_alias=True, mode="json") for t in e.timeline]}) from e
         except MetaAPIError as e:
             raise MissionError(e.status if e.status in (400, 401, 402, 404, 429) else 502, f"Muse Spark request failed: {e}", e.public()) from e
         spec = created["spec"]
-        return await self._store(instruction, "MUSE_SPARK", spec, outcome.explanation, outcome.timeline, [])
+        return await self._store(instruction, "MUSE_SPARK", spec, outcome.explanation, outcome.timeline, [], language)
 
     async def create(self, spec: MissionSpec, instruction: str = "") -> MissionRecord:
         if self.repo.get_mission(spec.mission_id):
@@ -168,7 +173,7 @@ class MissionService:
         await self.events.publish("mission.status", {"missionId": m.id, "status": to})
         return m
 
-    async def complete(self, mission_id: str, result: TwinMissionResult) -> MissionRecord:
+    async def complete(self, mission_id: str, result: TwinMissionResult, live: bool = True) -> MissionRecord:
         m = self.get(mission_id)
         if m.status in ("COMPLETED", "ABORTED", "FAILED"):
             raise MissionError(409, f"mission {m.id} already finished as {m.status}")
@@ -180,25 +185,28 @@ class MissionService:
             self.pipeline.cancel(m.id)
         self.repo.save_mission(m)
         await self.events.publish("mission.status", {"missionId": m.id, "status": m.status, "outcome": result.outcome})
-        task = asyncio.create_task(self.summarize(m.id))
+        task = asyncio.create_task(self.summarize(m.id, live))
         self._summaries.add(task)
         task.add_done_callback(self._summaries.discard)
         return m
 
-    async def summarize(self, mission_id: str) -> dict[str, Any]:
-        """Muse Spark summary from the stored records, or the labelled template when the model is unavailable or fails."""
+    async def summarize(self, mission_id: str, live: bool = True, language: Language | None = None) -> dict[str, Any]:
+        """Muse Spark summary from the stored records, or the labelled template when the model is unavailable or fails.
+        Muse Spark writes it in `language`, by default the mission's own; the template is always English."""
         await asyncio.sleep(0.5)  # let the last capture finish processing
         report = build_report(self.repo, mission_id)
         if report is None:
             raise MissionError(404, "mission not found")
         summary: dict[str, Any]
-        if self.spark is not None:
+        language = language or report["mission"]["language"]
+        if self.spark is not None and live:
             try:
-                data, latency = await self.spark.summarize({k: report[k] for k in ("mission", "outcome", "assets", "anomalyCandidates", "uninspectedAreas", "segmentation", "path", "disclaimers")}, ref=f"mission:{mission_id}")
+                records = {k: report[k] for k in ("mission", "outcome", "assets", "anomalyCandidates", "uninspectedAreas", "segmentation", "path", "disclaimers")}
+                data, latency = await self.spark.summarize(records, ref=f"mission:{mission_id} lang={language}", language=language)
                 summary = {
                     "provider": "MUSE_SPARK",
                     "model": self.spark.model,
-                    "latencyMs": round(latency, 1),
+                    "latencyMs": None if latency is None else round(latency, 1),  # None: replayed from the response cache
                     "summary": data.get("summary", ""),
                     "keyFindings": data.get("key_findings", []),
                     "limitations": data.get("limitations", []),
@@ -206,6 +214,8 @@ class MissionService:
                 }
             except MetaAPIError as e:
                 summary = {**template_summary(report), "error": f"Muse Spark summary failed: {e}"}
+        elif self.spark is not None:  # a locked request: the template answers, and says why, as interpret and capture do
+            summary = {**template_summary(report, why="live mode locked"), "error": "live mode locked: this summary was written from the records without Muse Spark"}
         else:
             summary = template_summary(report)
         self.repo.save_summary(mission_id, summary)

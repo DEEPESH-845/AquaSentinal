@@ -26,9 +26,15 @@ services:
       # the production Vercel URL, comma-separated if there are several
       - key: CORS_ORIGINS
         sync: false
-      # Vercel preview deployments, e.g. https://aquasentinal-[a-z0-9-]+\.vercel\.app
+      # Vercel preview deployments, e.g. https://aquasentinal-[a-z0-9-]+-<team-slug>\.vercel\.app (keep the slug: without it other people's projects match)
       - key: CORS_ORIGIN_REGEX
         sync: false
       # optional: leave empty for labelled offline mode
       - key: MODEL_API_KEY
+        sync: false
+      # cap in USD on live Meta spend. The free plan's disk is ephemeral, so the tally restarts with the service
+      - key: AQUA_META_BUDGET_USD
+        value: "1.00"
+      # optional: when set, Meta-calling routes need header X-Aqua-Passcode with this value (otherwise labelled LIVE LOCKED); use at least 16 random characters, e.g. openssl rand -hex 12
+      - key: AQUA_LIVE_PASSCODE
         sync: false

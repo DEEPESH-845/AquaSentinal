@@ -27,6 +27,8 @@ Objective = Literal["pipeline_inspection", "area_survey", "target_search"]
 ScanPattern = Literal["left_to_right", "right_to_left", "serpentine"]
 Priority = Literal["low", "normal", "high"]
 Provider = Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OPERATOR"]
+# The operator's language for Meta-written text and for Voice Transcribe's language bias. Offline templates stay English.
+Language = Literal["en", "hi"]
 MissionStatus = Literal["DRAFT", "PLANNED", "APPROVED", "RUNNING", "PAUSED", "COMPLETED", "ABORTED", "FAILED"]
 PerceptionState = Literal[
     "NORMAL_VISIBILITY", "REDUCED_VISIBILITY", "LOW_CONFIDENCE", "REOBSERVATION_REQUIRED", "INSPECTION_PAUSED", "OPERATOR_INTERVENTION_REQUIRED"
@@ -145,8 +147,8 @@ class ToolCallRecord(Wire):
     ok: bool
     result: Any = None
     error: str | None = None
-    phase: Literal["PLANNING", "EXECUTION", "REPORTING"]
-    by: Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OPERATOR", "SYSTEM"]
+    phase: Literal["PLANNING", "EXECUTION", "REPORTING", "ASK"]
+    by: Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OFFLINE_RECORDS_QUERY", "OPERATOR", "SYSTEM"]
     at: float
 
 
@@ -164,6 +166,8 @@ class MissionRecord(Wire):
     timeline: list[ToolCallRecord] = Field(default_factory=list)
     result: dict[str, Any] | None = None
     executor: Literal["TWIN", "BACKEND"] | None = None
+    # the operator's language when the mission was planned; a later summary is written in it
+    language: Language = "en"
 
 
 # ---------------------------------------------------------------- requests
@@ -185,6 +189,25 @@ class TwinContext(Wire):
 class InterpretRequest(Wire):
     instruction: str = Field(min_length=3, max_length=2000)
     context: TwinContext | None = None
+    language: Language = "en"
+
+
+class SummaryRequest(Wire):
+    """Regenerating a summary. No language means the mission's own."""
+
+    language: Language | None = None
+
+
+class AskRequest(Wire):
+    """A question about one mission's stored records. The answer is written in `language` when Muse Spark answers it."""
+
+    question: str = Field(min_length=3, max_length=500)
+    language: Language = "en"
+
+    @field_validator("question", mode="before")
+    @classmethod
+    def _strip(cls, v: Any) -> Any:
+        return v.strip() if isinstance(v, str) else v
 
 
 class InterpretResponse(Wire):
@@ -362,7 +385,142 @@ class TranscriptResult(Wire):
     model: str
     session_id: str
     audio_duration_ms: int
-    latency_ms: float
+    latency_ms: float | None  # None when the transcript came from the response cache
+
+
+# ---------------------------------------------------------------- ask the inspector
+
+AskProvider = Literal["MUSE_SPARK", "OFFLINE_RECORDS_QUERY"]
+# Why an offline records query answered instead of Muse Spark. None when Muse Spark answered.
+AskFallback = Literal["LIVE_LOCKED", "NO_KEY", "BUDGET_EXCEEDED", "LIVE_META_FAILED", "NO_ANSWER"]
+
+
+class AskCitation(Wire):
+    """A capture a tool returned and the answer rests on. x, y: gantry cm of the object observed in it (the capture position if nothing was)."""
+
+    capture_id: str
+    x: float
+    y: float
+    label: str
+
+
+class AskResponse(Wire):
+    answer: str
+    citations: list[AskCitation]
+    tool_calls: list[ToolCallRecord]
+    provider: AskProvider
+    model: str | None
+    # every Meta execution this answer cost or replayed, so the log can be checked against it (also when a fallback answered)
+    execution_ids: list[str]
+    # how many of those were requests that actually went to Meta (LIVE_META or LIVE_META_FAILED); the rest were replayed from the cache
+    requests_sent: int
+    # how the Meta calls behind a MUSE_SPARK answer were made: LIVE_META, CACHED_LIVE, MOCKED ... None for an offline answer
+    classification: str | None
+    fallback: AskFallback | None
+    note: str
+    # capture ids the model cited that no tool returned; they are removed from the answer
+    dropped_citations: list[str]
+    # the language the answer is actually written in: offline answers are always English
+    language: Language
+
+
+# ---------------------------------------------------------------- work orders
+
+WorkOrderPriority = Literal["P1", "P2", "P3"]
+WorkOrderEffort = Literal["S", "M", "L"]
+WorkOrderProvider = Literal["MUSE_SPARK", "OFFLINE_RULES"]
+
+
+class WorkOrderLocation(Wire):
+    """Gantry centimetres from the home corner, inside the travel (shared/geometry.json)."""
+
+    x: float = Field(ge=0, le=TRAVEL_X)
+    y: float = Field(ge=0, le=TRAVEL_Y)
+
+
+class WorkOrder(Wire):
+    """One job for a crew, resting on stored captures. Extra keys in a model's output are ignored, not trusted."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    priority: WorkOrderPriority
+    title: str = Field(min_length=1, max_length=120)
+    location: WorkOrderLocation
+    evidence: list[str] = Field(max_length=6)  # capture ids
+    action: str = Field(min_length=1, max_length=300)
+    effort: WorkOrderEffort
+    rationale: str = Field(min_length=1, max_length=400)
+
+
+class WorkOrdersRequest(Wire):
+    """Work orders for one mission, written in `language` when Muse Spark writes them."""
+
+    language: Language = "en"
+
+
+class WorkOrdersResponse(Wire):
+    orders: list[WorkOrder]
+    provider: WorkOrderProvider
+    model: str | None
+    # every Meta execution this list cost or replayed, also when a fallback produced it
+    execution_ids: list[str]
+    # how many of those were requests that actually went to Meta (LIVE_META or LIVE_META_FAILED); the rest were replayed from the cache
+    requests_sent: int
+    # how the Meta call behind a MUSE_SPARK list was made: LIVE_META, CACHED_LIVE, MOCKED ... None for an offline list
+    classification: str | None
+    # why the offline rules wrote the list instead of Muse Spark. None when Muse Spark wrote it (or there was nothing to order)
+    fallback: AskFallback | None
+    note: str
+    # capture ids the model cited that no record holds, and how many orders were dropped (unknown evidence, no evidence, invalid fields)
+    dropped_evidence: list[str]
+    dropped_orders: int
+    # the language the orders are written in: offline rules are always English
+    language: Language
+
+
+# ---------------------------------------------------------------- real water camera
+
+MAX_REAL_PROMPTS = 2  # SAM 3.1 requests (one per prompt) a single shutter may cost
+RealSegmentStatus = Literal["OK", "EMPTY", "FAILED", "SKIPPED_BUDGET"]
+
+
+class RealInstance(Wire):
+    """One mask SAM 3.1 returned for a phrase, in the pixels of the frame that was sent."""
+
+    box: tuple[int, int, int, int]
+    confidence: float | None  # the model's own score; None when it gave none (None is not zero)
+    area_px: int
+    polygons: list[list[tuple[int, int]]]
+
+
+class RealSegment(Wire):
+    """The answer to one phrase: one SAM 3.1 request, or the reason there was none."""
+
+    prompt: str
+    status: RealSegmentStatus
+    latency_ms: float | None  # None for a replayed (cached) answer: nothing was measured
+    error: str | None
+    instances: list[RealInstance]
+
+
+class RealSegmentResponse(Wire):
+    width: int
+    height: int
+    segments: list[RealSegment]
+    # SAM_3_1 when the model answered at least one phrase; UNAVAILABLE when no key, no passcode, or every request failed
+    provider: Literal["SAM_3_1", "UNAVAILABLE"]
+    model: str | None
+    # every Meta execution this shutter cost or replayed
+    execution_ids: list[str]
+    # how many of those were requests that actually went to Meta (LIVE_META or LIVE_META_FAILED); the rest were replayed from the cache
+    requests_sent: int
+    # how the Meta calls behind the masks were made: LIVE_META, CACHED_LIVE, MOCKED ... None when none succeeded
+    classification: str | None
+    latency_ms: float | None  # the slowest phrase (they run side by side); None when every answer was replayed or none was asked
+    cost_usd: float  # estimate from Meta list prices, summed over this shutter's LIVE_META executions (what the budget counts); a replay costs 0
+    fallback: Literal["NO_KEY", "LIVE_LOCKED"] | None
+    note: str
 
 
 # ---------------------------------------------------------------- commands over /ws/commands and /api/gantry

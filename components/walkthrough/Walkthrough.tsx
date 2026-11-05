@@ -20,6 +20,7 @@ const LabScene = dynamic(() => import("@/components/lab/Scene").then((m) => m.La
 
 /** Camera preset and how much the twin is dimmed behind each section's own visual. */
 const SECTIONS: Array<{ id: string; title: string; preset: CameraPreset; veil: number }> = [
+  { id: "need", title: "The need of the hour", preset: "C", veil: 0 },
   { id: "problem", title: "The problem", preset: "C", veil: 0 },
   { id: "system", title: "The system", preset: "A", veil: 0 },
   { id: "intelligence", title: "The intelligence", preset: "A", veil: 0.82 },
@@ -29,11 +30,12 @@ const SECTIONS: Array<{ id: string; title: string; preset: CameraPreset; veil: n
   { id: "enter", title: "Enter the lab", preset: "A", veil: 0.35 },
 ];
 
+const TOTAL = String(SECTIONS.length).padStart(2, "0");
 const PLAN = DEMO_FIXTURE_PLAN;
 const POLICY = PLAN.policy;
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
-/** Section 05 turbidity over the scrubbed range: silt rises to 0.85, then settles to 0.3 so the scan can resume. */
+/** Section 06 turbidity over the scrubbed range: silt rises to 0.85, then settles to 0.3 so the scan can resume. */
 const turbidityAt = (p: number) => (p < 0.65 ? 0.1 + (0.75 * p) / 0.65 : 0.85 - (0.55 * (p - 0.65)) / 0.35);
 
 const FLOW: FlowStep[] = [
@@ -62,7 +64,7 @@ function Index({ n }: { n: number }) {
     <div data-reveal className="mb-5 flex items-center gap-3">
       <span className="value text-[11px] text-teal">{String(n).padStart(2, "0")}</span>
       <span className="h-px w-10 bg-line-strong" />
-      <span className="value text-[11px] text-dim">07</span>
+      <span className="value text-[11px] text-dim">{TOTAL}</span>
       <span className="label ml-2">{SECTIONS[n - 1].title}</span>
     </div>
   );
@@ -93,16 +95,25 @@ function Lead({ children }: { children: ReactNode }) {
   );
 }
 
-function Spec({ k, v }: { k: string; v: string }) {
+function Spec({ k, v }: { k: string; v: ReactNode }) {
   return (
     <div data-reveal className="contents">
       <span className="label border-t border-line pt-2">{k}</span>
-      <span className="value border-t border-line pt-2 text-[13px] leading-snug text-text">{v}</span>
+      <span className="value break-words border-t border-line pt-2 text-[13px] leading-snug text-text">{v}</span>
     </div>
   );
 }
 
-/* ---------------------------------------------------------------- 05 live readout */
+/** A cited source, inline after the figure it backs. */
+function Src({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="text-teal underline underline-offset-2">
+      {children}
+    </a>
+  );
+}
+
+/* ---------------------------------------------------------------- 06 live readout */
 
 /** The walkthrough never changes the water under a running inspection: that mission's evidence would no longer match its plan. */
 const missionRunning = () => useSimStore.getState().mode === "MISSION";
@@ -228,7 +239,7 @@ export function Walkthrough() {
           }
         }
 
-        // 03: the flow lights up step by step, pinned on desktop only
+        // 04: the flow lights up step by step, pinned on desktop only
         const s3 = q("#intelligence")[0];
         if (desktop && !reduce) {
           const nodes = s3.querySelectorAll("[data-node]");
@@ -242,16 +253,16 @@ export function Walkthrough() {
           });
         }
 
-        // 04: the wipe follows the scroll; the range input stays available
+        // 05: the wipe follows the scroll; the range input stays available
         if (!reduce) ScrollTrigger.create({ trigger: q("[data-wipe]")[0], start: "top 80%", end: "bottom 30%", onUpdate: (self) => setWipe(90 - 80 * self.progress) });
 
-        // 05: scroll drives the twin's turbidity. Pinned on desktop; a plain scrubbed range on small screens.
+        // 06: scroll drives the twin's turbidity. Pinned on desktop; a plain scrubbed range on small screens.
         if (!reduce) {
           const s5 = q("#adaptive")[0];
           ScrollTrigger.create(desktop ? { trigger: s5, start: "top top", end: "+=140%", pin: true, onUpdate: (self) => setTurbidity(self.progress) } : { trigger: s5, start: "top 60%", end: "bottom 40%", onUpdate: (self) => setTurbidity(self.progress) });
         }
 
-        // 06: the plan path draws itself
+        // 07: the plan path draws itself
         if (!reduce) gsap.fromTo(q("[data-path]"), { strokeDashoffset: 1 }, { strokeDashoffset: 0, ease: "none", scrollTrigger: { trigger: q("#result svg")[0], start: "top 85%", end: "bottom 50%", scrub: true } });
 
         // created last so it reads section rects after the pins above have their spacers
@@ -292,11 +303,41 @@ export function Walkthrough() {
 
       <main className="relative z-10">
         {/* 01 */}
-        <section id="problem" data-section className="flex min-h-dvh items-center px-[6vw] pt-12 max-[999px]:items-end max-[999px]:px-4 max-[999px]:pb-10 max-[999px]:pt-[44vh]">
-          <Copy>
+        <section id="need" data-section className="flex min-h-dvh items-center px-[6vw] pt-12 max-[999px]:items-end max-[999px]:px-4 max-[999px]:pb-10 max-[999px]:pt-[44vh]">
+          <Copy className="max-w-[640px]">
             <Index n={1} />
-            <Headline>The deeper the inspection, the less you can trust your eyes.</Headline>
-            <Lead>Underwater inspection is challenged by degraded visibility, incomplete visual evidence and difficult coordination between operators and robotic systems.</Lead>
+            <Headline>The need of the hour: inspect water you cannot see through.</Headline>
+            <Lead>Fish farms, tanks and basins run on what happens under the surface, and turbid water is hard for people and for cameras to read.</Lead>
+            <div className="mt-6 grid grid-cols-[132px_minmax(0,1fr)] gap-x-4 gap-y-0">
+              <Spec
+                k="Who depends on it"
+                v={
+                  <>
+                    About 3 crore fishers and fish farmers. India is the second-largest fish producer, 8% of global output, 197.75 lakh tonnes in FY 2024-25 (<Src href="https://www.pib.gov.in/PressReleseDetailm.aspx?PRID=2213532&reg=3&lang=2">PIB, 12 Jan 2026</Src>).
+                  </>
+                }
+              />
+              <Spec
+                k="Who goes in"
+                v={
+                  <>
+                    Diving is dangerous work: 39 fatal injuries among US commercial divers in 2011 to 2017 (<Src href="https://www.cdc.gov/niosh/maritime/industries/commercial_diving.html">BLS data on NIOSH</Src>). Indian figures: not sourced.
+                  </>
+                }
+              />
+              <Spec
+                k="Why it is hard"
+                v={
+                  <>
+                    Absorption and scattering in water degrade underwater images (<Src href="https://arxiv.org/abs/1907.03246">Wang et al., arXiv 1907.03246</Src>).
+                  </>
+                }
+              />
+              <Spec k="Why now" v="Meta's multimodal models: Muse Spark plans and reasons, SAM 3.1 outlines, Voice Transcribe hears Hindi and English." />
+              <Spec k="What it does" v="Say the job, approve the plan, the twin scans, SAM 3.1 outlines targets, a controller slows or pauses in murk, and the record becomes cited answers and work orders." />
+              <Spec k="Proof today" v="Scene 08 labels where every output came from, and GET /api/evidence/model-executions lists each Meta call. No recorded live run exists yet: no MODEL_API_KEY has been set." />
+              <Spec k="Targets, not results" v="Plan an inspection in one sentence, record no frame the camera cannot be trusted on, hand over a work order per finding. None measured with operators." />
+            </div>
             <p data-reveal className="label mt-8 text-dim">
               Scroll. The tank behind this text is the live digital twin.
             </p>
@@ -304,9 +345,18 @@ export function Walkthrough() {
         </section>
 
         {/* 02 */}
-        <section id="system" data-section className="flex min-h-dvh items-center px-[6vw] py-24 max-[999px]:px-4 max-[999px]:pt-[44vh]">
+        <section id="problem" data-section className="flex min-h-dvh items-center px-[6vw] py-24 max-[999px]:px-4 max-[999px]:pt-[44vh]">
           <Copy>
             <Index n={2} />
+            <Headline>The deeper the inspection, the less you can trust your eyes.</Headline>
+            <Lead>Underwater inspection is challenged by degraded visibility, incomplete visual evidence and difficult coordination between operators and robotic systems.</Lead>
+          </Copy>
+        </section>
+
+        {/* 03 */}
+        <section id="system" data-section className="flex min-h-dvh items-center px-[6vw] py-24 max-[999px]:px-4 max-[999px]:pt-[44vh]">
+          <Copy>
+            <Index n={3} />
             <Headline size="md">A camera gantry over a pipeline in a test tank.</Headline>
             <Lead>An XY gantry carries a downward camera across the tank. Every move is bounded by soft limits, and every frame is tied to the gantry position it was taken from.</Lead>
             <div className="mt-6 grid grid-cols-[132px_1fr] gap-x-4 gap-y-0">
@@ -322,10 +372,10 @@ export function Walkthrough() {
           </Copy>
         </section>
 
-        {/* 03 */}
+        {/* 04 */}
         <section id="intelligence" data-section className="grid min-h-dvh grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-12 px-[6vw] py-16 max-[999px]:grid-cols-1 max-[999px]:gap-6 max-[999px]:px-4 max-[999px]:py-20">
           <Copy>
-            <Index n={3} />
+            <Index n={4} />
             <Headline size="md">From a sentence to a bounded mission.</Headline>
             <Lead>The operator says what to inspect. Meta models turn it into structure; the backend decides what is allowed to move.</Lead>
           </Copy>
@@ -334,10 +384,10 @@ export function Walkthrough() {
           </div>
         </section>
 
-        {/* 04 */}
+        {/* 05 */}
         <section id="perception" data-section className="grid min-h-dvh grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-12 px-[6vw] py-24 max-[999px]:grid-cols-1 max-[999px]:gap-6 max-[999px]:px-4">
           <Copy>
-            <Index n={4} />
+            <Index n={5} />
             <Headline size="md">Outlines, not guesses.</Headline>
             <Lead>For every capture, Muse Spark names what to look for and SAM 3.1 returns a mask for each instance. Masks become tracked observations with a position on the gantry plane, so the same cable seen twice stays one object.</Lead>
             <p data-reveal className="mt-4 text-[14px] leading-relaxed text-muted">
@@ -349,11 +399,11 @@ export function Walkthrough() {
           </div>
         </section>
 
-        {/* 05 */}
+        {/* 06 */}
         <section id="adaptive" data-section className="flex min-h-dvh items-center px-[6vw] py-16 max-[999px]:flex-col max-[999px]:items-stretch max-[999px]:px-4 max-[999px]:pt-[44vh]">
           <div className="grid w-full max-w-[1000px] grid-cols-[minmax(0,1fr)_minmax(0,340px)] gap-8 max-[999px]:grid-cols-1 max-[999px]:gap-4">
             <Copy className="pb-4">
-              <Index n={5} />
+              <Index n={6} />
               <Headline size="md">When the water clouds, the scan adapts.</Headline>
               <Lead>Keep scrolling: silt rises in the twin and then settles. The controller slows below the degraded threshold and pauses below the unsafe one, instead of recording frames nobody should trust.</Lead>
               <div className="mt-6">
@@ -374,10 +424,10 @@ export function Walkthrough() {
           </div>
         </section>
 
-        {/* 06 */}
+        {/* 07 */}
         <section id="result" data-section className="grid min-h-dvh grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-12 px-[6vw] py-24 max-[999px]:grid-cols-1 max-[999px]:gap-6 max-[999px]:px-4">
           <Copy>
-            <Index n={6} />
+            <Index n={7} />
             <Headline size="md">From a camera feed to an intelligent inspection system.</Headline>
             <Lead>
               The same plan run twice on scenario E ({presetE?.name.toLowerCase()}): once with the visibility policy, once at fixed speed. Every finding keeps its frame, its source and its uncertainty; nothing is called a defect until it is verified.
@@ -397,13 +447,13 @@ export function Walkthrough() {
           </div>
         </section>
 
-        {/* 07 */}
+        {/* 08 */}
         <section id="enter" data-section className="flex min-h-[80dvh] items-center justify-center px-[6vw] py-24 text-center max-[999px]:px-4">
           <div className="max-w-[640px] bg-[radial-gradient(ellipse_at_center,rgb(8_15_22/0.9)_30%,rgb(8_15_22/0)_75%)] px-8 py-10">
             <div data-reveal className="mb-5 flex items-center justify-center gap-3">
-              <span className="value text-[11px] text-teal">07</span>
+              <span className="value text-[11px] text-teal">{TOTAL}</span>
               <span className="h-px w-10 bg-line-strong" />
-              <span className="value text-[11px] text-dim">07</span>
+              <span className="value text-[11px] text-dim">{TOTAL}</span>
             </div>
             <Headline size="md">Enter the lab.</Headline>
             <Lead>Describe an inspection, approve the plan, change the water and read the evidence. Every value is labelled live, simulated or fallback.</Lead>

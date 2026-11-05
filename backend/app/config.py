@@ -27,6 +27,9 @@ def _float(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     model_api_key: str = field(default="", repr=False)
+    # process-wide cap on Meta spend in USD (see meta/governor.py) and the optional passcode that unlocks live Meta calls
+    meta_budget_usd: float = 1.00
+    live_passcode: str = field(default="", repr=False)
     meta_base_url: str = "https://api.meta.ai/v1"
     spark_model: str = "muse-spark-1.3"
     sam_model: str = "sam-3.1"
@@ -65,6 +68,8 @@ class Settings:
             "metaBaseUrl": self.meta_base_url,
             "models": {"spark": self.spark_model, "sam": self.sam_model, "voice": self.voice_model},
             "metaConfigured": self.meta_available,
+            "budgetUsd": self.meta_budget_usd,
+            "liveLockEnabled": bool(self.live_passcode),
             "limits": {
                 "samConcurrency": self.sam_concurrency,
                 "maxSamRequestsPerMission": self.max_sam_requests_per_mission,
@@ -81,6 +86,8 @@ def load_settings() -> Settings:
     origins = tuple(o.strip().rstrip("/") for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip())
     return Settings(
         model_api_key=os.environ.get("MODEL_API_KEY", "").strip(),
+        meta_budget_usd=max(0.0, _float("AQUA_META_BUDGET_USD", 1.00)),
+        live_passcode=os.environ.get("AQUA_LIVE_PASSCODE", "").strip(),
         meta_base_url=os.environ.get("META_MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"),
         spark_model=os.environ.get("META_SPARK_MODEL", "muse-spark-1.3"),
         sam_model=os.environ.get("META_SAM_MODEL", "sam-3.1"),

@@ -8,7 +8,9 @@ import type { InspectionReport } from "@/lib/api/types";
 import { GANTRY } from "@/lib/sim/constants";
 import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore } from "@/lib/store/mission";
-import { Btn, CardHead, SourceTag, f1, f2, human, isTargetClass, pad2, pct, providerSource } from "./shared";
+import { AskCard } from "./ask";
+import { WorkOrdersCard } from "./workorders";
+import { Btn, CardHead, HindiNeedsMeta, SourceTag, f1, f2, human, isTargetClass, pad2, pct, providerSource } from "./shared";
 import { C } from "@/lib/theme";
 
 const MAP_W = 300;
@@ -187,6 +189,7 @@ export function ReportCard() {
   }
 
   const s = r.summary;
+  const summaryLang = s.provider === "MUSE_SPARK" && r.mission.language === "hi" ? "hi" : undefined; // only Meta writes Hindi; templates are English
   const replay = () => {
     const plan = mission?.id === r.mission.id ? mission.plan : null;
     if (plan && useSimStore.getState().runMission(plan, true)) useSimStore.getState().setScene(4);
@@ -196,6 +199,7 @@ export function ReportCard() {
       <CardHead
         title="Inspection report"
         note={r.mission.instruction}
+        noteLang={/\p{Script=Devanagari}/u.test(r.mission.instruction) ? "hi" : undefined} // spoken or typed Hindi; Hinglish in Latin letters is not marked
         right={
           <div className="flex shrink-0 gap-1.5">
             <Btn
@@ -219,15 +223,20 @@ export function ReportCard() {
       />
       <Metrics r={r} />
       <div className="mt-3 grid grid-cols-[minmax(0,1fr)_300px] gap-4 max-[999px]:grid-cols-1">
-        <div className="min-w-0">
+        <div className="min-w-0" data-testid="report-summary">
           <div className="mb-1 flex items-center justify-between gap-2">
             <span className="label text-dim">Summary</span>
-            <SourceTag source={providerSource(s.provider)} />
+            <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+              <HindiNeedsMeta offline={s.provider !== "MUSE_SPARK"} />
+              <SourceTag source={providerSource(s.provider)} />
+            </span>
           </div>
-          <p className="text-[12px] leading-snug text-text">{s.summary}</p>
+          <p lang={summaryLang} className="text-[12px] leading-snug text-text">
+            {s.summary}
+          </p>
           {s.error && <p className="mt-0.5 text-[10px] text-dim">{s.error}</p>}
           {s.limitations.length > 0 && (
-            <ul className="mt-1 list-disc pl-4">
+            <ul lang={summaryLang} className="mt-1 list-disc pl-4">
               {s.limitations.map((l) => (
                 <li key={l} className="text-[11px] leading-snug text-muted">
                   {l}
@@ -292,6 +301,8 @@ export function ReportCard() {
         )}
         <span className="text-[10px] leading-snug text-dim">{r.disclaimers[0]}</span>
       </div>
+      <WorkOrdersCard report={r} />
+      <AskCard report={r} />
       <History />
     </div>
   );

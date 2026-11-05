@@ -50,7 +50,7 @@ function DemoCommand() {
       <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
         {transcript ? (
           <>
-            <ExecTag c={transcript.source === "RECORDED_INPUT" ? "RECORDED_INPUT" : "LIVE_INPUT"} /> <ExecTag c={exec ?? "NOT_RUN"} /> Muse Voice Transcribe, {transcript.latencyMs} ms
+            <ExecTag c={transcript.source === "RECORDED_INPUT" ? "RECORDED_INPUT" : "LIVE_INPUT"} /> <ExecTag c={exec ?? "NOT_RUN"} /> Muse Voice Transcribe, {transcript.latencyMs === null ? "cached" : `${transcript.latencyMs} ms`}
           </>
         ) : voice.state === "TRANSCRIBING" ? (
           "Transcribing the recorded instruction..."

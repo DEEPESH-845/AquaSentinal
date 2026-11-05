@@ -1,7 +1,8 @@
 """The allowlisted tools Muse Spark and the executor may call.
 
 Every tool has a Pydantic argument model, a phase allowlist and a handler. The model is only ever offered the
-PLANNING tools (read-only state plus create_inspection_mission); motion and execution tools exist for the operator-
+PLANNING tools (read-only state plus create_inspection_mission) or, when it answers a question about a mission, the ASK
+tools (read-only views of the stored records and nothing else); motion and execution tools exist for the operator-
 approved executor and are refused if anything asks for them in the wrong phase. Nothing a model writes reaches the
 motion controller without passing through these models and then the motion controller's own interlocks.
 """
@@ -17,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..schemas import TRAVEL_X, TRAVEL_Y, MissionSpec, Objective, Priority, Region, ScanPattern, TargetClass, ToolCallRecord, VisibilityPolicySpec
 
-Phase = Literal["PLANNING", "EXECUTION", "REPORTING"]
-Caller = Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OPERATOR", "SYSTEM"]
+Phase = Literal["PLANNING", "EXECUTION", "REPORTING", "ASK"]
+Caller = Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OFFLINE_RECORDS_QUERY", "OPERATOR", "SYSTEM"]
 
 
 class Args(BaseModel):
@@ -77,6 +78,18 @@ class ObservationArgs(Args):
     note: str = Field("", max_length=500)
 
 
+class ListObservationsArgs(Args):
+    label: TargetClass | None = Field(None, description="Only observations of this class. Omit for all of them.")
+
+
+class CaptureRef(Args):
+    capture_id: str = Field(max_length=64, description="A captureId returned by list_observations or get_mission_summary.")
+
+
+class TrackRef(Args):
+    track_id: str = Field(max_length=64, description="A trackId (asset id) returned by list_observations or get_mission_summary.")
+
+
 Handler = Callable[[BaseModel], Awaitable[Any]]
 
 
@@ -108,6 +121,12 @@ TOOLS: dict[str, ToolDef] = {
         ToolDef("stop_inspection", "Stop a running mission.", MissionRef, frozenset({"EXECUTION"})),
         ToolDef("record_observation", "Record an operator or system observation at gantry coordinates.", ObservationArgs, frozenset({"EXECUTION"})),
         ToolDef("generate_inspection_summary", "Generate the evidence-backed summary for a finished mission.", MissionRef, frozenset({"REPORTING"})),
+        # ASK: read-only views of one mission's stored records. Nothing here writes, moves or calls a model.
+        ToolDef("list_observations", "List the objects the camera observed in this mission (capture, track, class, position, confidence), optionally for one class.", ListObservationsArgs, frozenset({"ASK"})),
+        ToolDef("get_capture", "One capture of this mission: where it was taken, the water and image quality, and what was observed and segmented in it.", CaptureRef, frozenset({"ASK"})),
+        ToolDef("get_track", "One tracked object seen in this mission: class, position, every capture it appears in, best confidence and where it came from.", TrackRef, frozenset({"ASK"})),
+        ToolDef("get_mission_summary", "Outcome, counts, coverage, uninspected strips and unverified anomaly candidates of this mission.", NoArgs, frozenset({"ASK"})),
+        ToolDef("compare_with_previous_mission", "Compare this mission with the most recent earlier completed mission. Says so explicitly when there is none.", NoArgs, frozenset({"ASK"})),
     ]
 }
 
@@ -162,5 +181,5 @@ class ToolRegistry:
         except ValidationError as e:
             msg = "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors())
             return ToolCallRecord(name=name, arguments=args_dict, ok=False, error=f"invalid arguments: {msg}", phase=phase, by=by, at=time.time())
-        except (ToolNotPermitted, ValueError) as e:
+        except (ToolNotPermitted, ValueError, TypeError) as e:
             return ToolCallRecord(name=name, arguments=args_dict, ok=False, error=str(e), phase=phase, by=by, at=time.time())

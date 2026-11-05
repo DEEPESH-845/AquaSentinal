@@ -6,6 +6,7 @@ import { gsap } from "@/lib/animations/gsap";
 import { DUR, EASE, prefersReducedMotion } from "@/lib/animations/motion";
 import { useSimStore } from "@/lib/sim/store";
 import type { DetectedClass } from "@/lib/sim/types";
+import { useMissionStore } from "@/lib/store/mission";
 
 export const f1 = (n: number) => n.toFixed(1);
 export const f2 = (n: number) => n.toFixed(2);
@@ -45,9 +46,29 @@ export function SourceTag({ source, className }: { source: Source; className?: s
 export const providerSource = (p: string | null | undefined): Source =>
   p === "MUSE_SPARK" ? "MUSE_SPARK" : p === "SAM_3_1" ? "SAM_3_1" : p === "OPERATOR" ? "OPERATOR" : p === "TEMPLATE_FROM_RECORDS" ? "TEMPLATE" : p === "OFFLINE_FIXTURE" ? "TWIN_TRUTH" : p === "SIM_DETECTOR" ? "SIM_DETECTOR" : "OFFLINE";
 
+/**
+ * Beside output that did not come from a Meta model, while Hindi is selected: offline parsers and templates are English only
+ * and are never machine-translated. `offline` is true for anything but a live Meta answer (no key, locked, template, fallback).
+ */
+export function HindiNeedsMeta({ offline, className }: { offline: boolean; className?: string }) {
+  const hindi = useMissionStore((s) => s.language === "hi");
+  if (!hindi || !offline) return null;
+  return (
+    <span data-testid="hindi-needs-meta" title="This output is English. Hindi voice, plans and summaries are written by the Meta models." className={clsx("value text-[10px] text-amber", className)}>
+      Hindi needs Meta models
+    </span>
+  );
+}
+
 const DOT_BG = { teal: "bg-teal", amber: "bg-amber", danger: "bg-danger", dim: "bg-dim" } as const;
 
 /** Status dot. `pulse` marks a live heartbeat (a dependency answering right now), never a decoration. */
+/** How many logged executions actually went to Meta; the rest are cache replays that sent nothing. */
+export function SentToMeta({ sent, logged }: { sent: number; logged: number }) {
+  const replayed = Math.max(0, logged - sent);
+  return <>{` / ${sent} sent to Meta${replayed > 0 ? `, ${replayed} replayed from cache` : ""}`}</>;
+}
+
 export function Dot({ tone, pulse }: { tone: keyof typeof DOT_BG; pulse?: boolean }) {
   return (
     <span className="relative inline-flex h-1.5 w-1.5 shrink-0">
@@ -60,12 +81,12 @@ export function Dot({ tone, pulse }: { tone: keyof typeof DOT_BG; pulse?: boolea
 /** Object list reference is stable across publishes; positions are read with primitive selectors elsewhere. */
 export const useObjects = () => useSimStore((s) => s.scenario.objects);
 
-export function CardHead({ title, note, right }: { title: string; note?: string; right?: ReactNode }) {
+export function CardHead({ title, note, noteLang, right }: { title: string; note?: string; noteLang?: string; right?: ReactNode }) {
   return (
     <div className="mb-3 flex items-start justify-between gap-3">
       <div>
         <h2 className="font-sans text-xl leading-tight text-text">{title}</h2>
-        {note && <p className="mt-1 text-[12px] leading-snug text-muted">{note}</p>}
+        {note && <p lang={noteLang} className="mt-1 text-[12px] leading-snug text-muted">{note}</p>}
       </div>
       {right}
     </div>
@@ -159,6 +180,7 @@ export function Btn({
   className,
   title,
   label,
+  testId,
 }: {
   children: ReactNode;
   onClick: () => void;
@@ -169,6 +191,7 @@ export function Btn({
   className?: string;
   title?: string;
   label?: string;
+  testId?: string;
 }) {
   return (
     <button
@@ -177,6 +200,7 @@ export function Btn({
       disabled={disabled}
       title={title}
       aria-label={label}
+      data-testid={testId}
       className={clsx("btn inline-flex items-center gap-1.5", primary && "btn-primary", danger && "btn-danger", active && "btn-active", className)}
     >
       {children}
@@ -188,17 +212,57 @@ export function Btn({
  * Single-choice control. The selection indicator glides to the chosen option (GSAP), so the eye follows the change.
  * Arrow keys move the choice, as a radio group should.
  */
-export function Segmented<T extends string>({ options, value, onChange, label, className }: { options: Array<{ id: T; text: string; title?: string }>; value: T; onChange: (v: T) => void; label: string; className?: string }) {
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  label,
+  className,
+}: {
+  /** `lang` marks an option written in another language, so assistive tech reads it with the right voice */
+  options: Array<{ id: T; text: string; title?: string; lang?: string }>;
+  value: T;
+  onChange: (v: T) => void;
+  label: string;
+  className?: string;
+}) {
   const root = useRef<HTMLDivElement>(null);
   const ind = useRef<HTMLSpanElement>(null);
   const first = useRef(true);
+  // The indicator's box. It is tweened as a plain object and written to the style by hand: GSAP's CSS plugin rounds px values to whole pixels.
+  const at = useRef({ x: 0, width: 0 });
   useLayoutEffect(() => {
-    const btn = root.current?.querySelector<HTMLElement>(`[data-seg="${value}"]`);
-    if (!btn || !ind.current) return;
-    const to = { x: btn.offsetLeft, width: btn.offsetWidth };
-    if (first.current || prefersReducedMotion()) gsap.set(ind.current, to);
-    else gsap.to(ind.current, { ...to, duration: DUR.base, ease: EASE.out, overwrite: true });
+    const box = root.current;
+    const el = ind.current;
+    const btn = box?.querySelector<HTMLElement>(`[data-seg="${value}"]`);
+    if (!box || !el || !btn) return;
+    const pos = at.current;
+    const draw = () => {
+      el.style.transform = `translateX(${pos.x}px)`;
+      el.style.width = `${pos.width}px`;
+    };
+    // the option's box relative to the root's padding edge, with its fractional width (offsetLeft and offsetWidth round)
+    const measure = () => {
+      const b = btn.getBoundingClientRect();
+      return { x: b.left - box.getBoundingClientRect().left - box.clientLeft, width: b.width };
+    };
+    if (first.current || prefersReducedMotion()) {
+      Object.assign(pos, measure());
+      draw();
+    } else gsap.to(pos, { ...measure(), duration: DUR.base, ease: EASE.out, overwrite: true, onUpdate: draw });
     first.current = false;
+    // a web font that arrives after the first paint (the Devanagari one) changes the options' widths: follow the selected option
+    let width = box.getBoundingClientRect().width; // the observer also reports once on observe(); that one changes nothing and must not cut the glide short
+    const ro = new ResizeObserver(() => {
+      const now = box.getBoundingClientRect().width;
+      if (now === width) return;
+      width = now;
+      gsap.killTweensOf(pos);
+      Object.assign(pos, measure());
+      draw();
+    });
+    ro.observe(box);
+    return () => ro.disconnect();
   }, [value, options.length]);
   const move = (d: number) => {
     const i = options.findIndex((o) => o.id === value);
@@ -217,6 +281,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, c
           aria-checked={o.id === value}
           tabIndex={o.id === value ? 0 : -1}
           data-seg={o.id}
+          lang={o.lang}
           title={o.title}
           onClick={() => onChange(o.id)}
           onKeyDown={(e) => {
@@ -226,7 +291,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, c
             e.stopPropagation();
             move(d);
           }}
-          className={clsx("relative px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.1em] transition-colors duration-200", o.id === value ? "text-teal" : "text-muted hover:text-text")}
+          className={clsx("relative px-2 py-[3px] font-mono text-[10px] uppercase transition-colors duration-200", o.lang ? "tracking-normal" : "tracking-[0.1em]", o.id === value ? "text-teal" : "text-muted hover:text-text")}
         >
           {o.text}
         </button>

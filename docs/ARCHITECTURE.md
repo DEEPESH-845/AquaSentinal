@@ -34,7 +34,13 @@ twin at each capture waypoint --> CaptureRequest --> FeedRenderer renders frame 
     --> IoU vs ID pass --> track association --> observations --> stored, event capture.processed
 twin mission ends --POST /api/missions/{id}/complete--> COMPLETED/ABORTED --> summary (Spark or template)
     --> event report.ready --> GET /api/inspection/{id}/report (JSON or Markdown)
+operator question --POST /api/inspection/{id}/ask--> Muse Spark over read-only record tools --> grounded answer with citations
+operator click --POST /api/inspection/{id}/work-orders--> Muse Spark structured output over the tracked objects --> work orders citing capture ids
+phone or laptop camera frame --POST /api/ai/segment-image--> SAM 3.1 per noun phrase --> masks drawn over the still (nothing stored)
 ```
+
+Every arrow that reaches Meta passes through the governor (section 7): response cache, budget cap and live lock.
+Ask, work orders and the real water frame follow the same rule as planning: no key, a locked backend, an exhausted budget or a failed call produces a labelled offline answer, never a substitute presented as live.
 
 ## 4. REST routes
 
@@ -43,24 +49,28 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 | Route | Purpose |
 |---|---|
 | `GET /api/health` | `{status, version, db, uptimeS}` |
-| `GET /api/system/status` | Mode, hardware flags, provider status (LIVE or OFFLINE plus fallback), usage and cost estimates, inference queue, gantry snapshot, camera status |
+| `GET /api/system/status` | Mode, hardware flags, provider status (LIVE, LIVE_LOCKED or OFFLINE plus fallback), usage and cost estimates, `credits` (`budgetUsd, spentUsd, remainingUsd, liveCalls, cachedCalls, saved: {total, byReason}`), `live` (`lockEnabled, unlocked`), inference queue, gantry snapshot, camera status |
+| `POST /api/system/unlock` | `{passcode}`; returns `{unlocked}`, 429 after 10 failed attempts per minute per client address (rightmost `X-Forwarded-For` entry) or 30 across all clients; a correct passcode is never counted. With `AQUA_LIVE_PASSCODE` set, Meta-calling routes need header `X-Aqua-Passcode`; without it they take the offline path (transcribe and segment return 403 `{error: "live mode locked"}`). See `backend/app/meta/governor.py` |
 | `GET /api/system/config` | Non-secret config: models, limits, geometry, perception thresholds |
-| `POST /api/voice/transcribe` | Multipart `audio` (WAV); returns `{transcript, provider, model, sessionId, audioDurationMs, latencyMs}`; 503 without a key |
-| `POST /api/ai/interpret?offline=` | `{instruction, context?}`; returns `{mission, provider, model}`; Spark failures return the error and tool timeline, never a substitute |
+| `POST /api/voice/transcribe` | Multipart `audio` (WAV), optional `inputSource`, optional `language` (`en` default, or `hi`: sends `languageBias: ["Hindi", "English"]`, otherwise `["English"]`); returns `{transcript, provider, model, sessionId, audioDurationMs, latencyMs}`; 503 without a key |
+| `POST /api/ai/interpret?offline=` | `{instruction, context?, language?}` (`language` is `en` by default, or `hi`: Muse Spark writes its explanation in Hindi, tool arguments stay English enums; the instruction may be Hindi or Hinglish either way, and the mission stores the language); returns `{mission, provider, model}`; Spark failures return the error and tool timeline, never a substitute |
 | `POST /api/ai/segment` | `{captureId, prompt}`; one SAM 3.1 request on a stored frame |
+| `POST /api/ai/segment-image` | Real water camera. Multipart `frame` (JPEG, 4 MB cap, 413 over it, 422 if undecodable) plus one or two `prompt` fields (422 for none, more than two, blank or over 60 characters; a repeat is asked once). One SAM 3.1 request per prompt through the governor (cache, budget cap, execution log); returns `{width, height, segments: [{prompt, status, latencyMs, error, instances: [{box, confidence, areaPx, polygons}]}], provider, model, executionIds, requestsSent, classification, latencyMs, costUsd, fallback, note}` (`executionIds` includes cache replays; `requestsSent` counts only the requests that went to Meta). No key or locked answers 200 with `fallback` `NO_KEY` or `LIVE_LOCKED`, no segments and no request sent. Nothing is stored |
 | `POST /api/missions` | Create from an operator `MissionSpec` |
 | `GET /api/missions`, `GET /api/missions/{id}` | Mission records |
 | `POST /api/missions/{id}/plan` | Re-compile a PLANNED or APPROVED mission, optionally with a new spec |
 | `POST /api/missions/{id}/start` | `{executor: "TWIN" or "BACKEND"}`; BACKEND requires active hardware; refused while the e-stop is latched |
 | `POST /api/missions/{id}/pause`, `/resume`, `/stop` | Status transitions, enforced by `TRANSITIONS`; stop cancels in-flight inference |
-| `POST /api/missions/{id}/complete` | The twin's `MissionResult`; starts the summary task |
+| `POST /api/missions/{id}/complete` | The twin's `MissionResult`; starts the summary task, written in the mission's language |
 | `POST /api/inspection/capture` | Multipart `meta` (JSON `CaptureMeta`), `frame` (JPEG, at most 4 MB), optional `idmask` (PNG); returns `CaptureResult` |
 | `GET /api/inspection/frames/{captureId}?kind=frame or ids` | Stored frame or ID mask |
 | `GET /api/inspection/captures/{missionId}` | Captures with quality, reasoning and segmentations |
 | `POST /api/inspection/observations` | Operator observation at gantry coordinates |
 | `GET /api/inspection/history`, `GET /api/inspection/assets` | Mission history and persistent assets |
 | `GET /api/inspection/{id}/report?format=json or md` | Report built from stored records |
-| `POST /api/inspection/{id}/summary` | Regenerate the summary |
+| `POST /api/inspection/{id}/summary` | Regenerate the summary; optional body `{language}` overrides the mission's language. Offline templates stay English and are never machine-translated |
+| `POST /api/inspection/{id}/ask` | Body `{question, language}`. Muse Spark answers through at most three bounded requests over the read-only ASK tools (`list_observations`, `get_capture`, `get_track`, `get_mission_summary`, `compare_with_previous_mission`), each request cached, budgeted and lock-checked by the governor. Returns `{answer, citations: [{captureId, x, y, label}], toolCalls, provider, model, executionIds, classification, fallback, note, droppedCitations, language}`. Capture ids no tool returned are dropped; `[n]` in the answer refers to `citations[n - 1]`. When locked, keyless, over budget, failed or ungrounded, the deterministic `OFFLINE_RECORDS_QUERY` answers (where, how many, what, confidence) and `fallback` says why |
+| `POST /api/inspection/{id}/work-orders` | Body `{language}`. One Muse Spark structured-output request (`response_format` json_schema, at most 1500 output tokens) over the mission's tracked objects, through the governor. Returns `{orders: [{priority P1 to P3, title, location {x, y}, evidence [captureId], action, effort S, M or L, rationale}], provider, model, executionIds, classification, fallback, note, droppedEvidence, droppedOrders, language}`. An order whose evidence names no stored capture, or that fails the schema, is dropped and counted, never repaired; locations are clamped into the gantry travel. When keyless, locked, over budget, failed or ungrounded, a fixed rule table writes the orders (provider `OFFLINE_RULES`, English) and `fallback` says why. A mission with no observed object makes no request and orders nothing. Loose cables and foreign objects are written as anomaly candidates to verify on site. Nothing is stored |
 | `POST /api/gantry/command` | Command envelope (below) |
 | `GET /api/telemetry` | Gantry snapshot after one watchdog check, camera status |
 | `GET /api/camera/stream` | MJPEG of the latest frame |
@@ -83,7 +93,8 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 ## 7. Persistence
 
 - `backend/app/db.py` `Repository` is the only class that writes SQL (stdlib `sqlite3`, WAL mode).
-- Tables: `missions`, `captures`, `segmentations`, `assets`, `observations`, `summaries`; records are stored as validated JSON next to indexed keys.
+- Tables: `missions`, `captures`, `segmentations`, `assets`, `observations`, `summaries`, `model_executions` (every Meta request, see docs/META_MODEL_INTEGRATION.md) and `meta_cache` (the governor's response cache, keyed by the sha256 of the request); records are stored as validated JSON next to indexed keys.
+- Answers from Ask, work orders and the real water camera are not stored: the browser keeps them in memory (the last 20 questions), and the executions behind them are in `model_executions`.
 - Frames and ID masks are files under `AQUA_DATA_DIR/frames/<mission>/`.
 - `DATABASE_URL` accepts only `sqlite:///` in this build; a PostgreSQL implementation is a second class with the same methods, since every caller speaks Pydantic models.
 
@@ -92,3 +103,17 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 - `useSimStore` (`lib/sim/store.ts`) is the twin: engine, 20 Hz snapshot, scene and demo state.
 - `useMissionStore` (`lib/store/mission.ts`) holds everything that crosses the network: backend status, the mission record, captures and their results, reports, history.
 - `BackendBridge` polls status every 5 s, holds the event socket, posts finished twin missions and requests the demo plan.
+- The live-mode passcode is held by `lib/api/client.ts`: in `sessionStorage` (this tab only, never the URL or `localStorage`) with an in-memory copy for browsers that block storage, and sent as `X-Aqua-Passcode` on every API request.
+  The backend counts a wrong passcode header as a failed attempt on `/api/system/status` and the Meta-calling routes, so the client forgets it as soon as the status read shows the lock refused it, or a model route answers 403 `live mode locked`, and then stops sending it.
+  Overlapping status reads share one request so a stale passcode costs one attempt, not several, and only the newest read may write the status, so a slow read from before an unlock or re-lock cannot overwrite it.
+  A 429 on any other route is Meta rate limiting the backend and does not touch the passcode.
+- The operator language (`en` or `hi`, default `en`) is `language` in `useMissionStore`, chosen with the EN | हिन्दी control in AI mission control and remembered in `localStorage` under `aqua.language` (read after mount; a blocked storage leaves the choice for the page only).
+  It is sent as `language` on Voice Transcribe and planning requests, and only Meta models honour it.
+  Wherever the output came from the offline parser or a template while Hindi is selected, the UI says `Hindi needs Meta models`: those paths stay English.
+- Ask the inspector and Work orders live in `components/ui/ask.tsx` and `components/ui/workorders.tsx` under the report in scene 07; their state (`asks`, `workOrders`) is in `useMissionStore` and is keyed by mission id.
+  Work orders print through a print stylesheet that leaves one order per page.
+- Real water (`components/ui/realcam.tsx`) is a modal opened from the header camera button.
+  It reads one frame from `getUserMedia` or an uploaded photo, downscales it to 1024 px on the long side as JPEG in the browser and sends it to `/api/ai/segment-image`; the camera is released when the dialog closes.
+  `getUserMedia` needs a secure origin, so on plain `http` over a LAN address the panel offers the upload instead.
+- `components/ui/credits.tsx` holds the header credit chip with its popover and the unlock dialog.
+  Every figure comes from the `credits` object of the status; the popover carries the lock and unlock button wherever the header draws no AI chip (locked: below 600 px, unlocked: below 999 px).

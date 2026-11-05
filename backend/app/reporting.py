@@ -60,7 +60,7 @@ def uninspected_areas(region: dict[str, float], positions: list[tuple[float, flo
     return missing, seen / (cols * rows)
 
 
-def template_summary(report: dict[str, Any]) -> dict[str, Any]:
+def template_summary(report: dict[str, Any], why: str = "no MODEL_API_KEY") -> dict[str, Any]:
     """Deterministic summary from the records, used when Muse Spark is unavailable. Labelled as such."""
     assets = report["assets"]
     anomalies = report["anomalyCandidates"]
@@ -73,7 +73,7 @@ def template_summary(report: dict[str, Any]) -> dict[str, Any]:
     if low:
         limitations.append(f"{len(low)} frame(s) had an unreliable image-derived visibility estimate.")
     if report["segmentation"]["provider"] != "SAM_3_1":
-        limitations.append("SAM 3.1 was not used (no MODEL_API_KEY); observations come from the simulated detector.")
+        limitations.append(f"SAM 3.1 was not used ({why}); observations come from the simulated detector.")
     return {
         "provider": "TEMPLATE_FROM_RECORDS",
         "summary": (
@@ -173,6 +173,7 @@ def build_report(repo: Repository, mission_id: str) -> dict[str, Any] | None:
             "spec": m.spec.model_dump(by_alias=True),
             "planSummary": m.plan_summary.model_dump(by_alias=True),
             "executor": m.executor,
+            "language": m.language,
         },
         "outcome": {
             "status": m.status,

@@ -4,7 +4,21 @@
  */
 import type { MissionPlan } from "@/lib/sim/types";
 
-export type ProviderStatus = { status: "LIVE" | "OFFLINE"; model: string; fallback: string | null };
+/** LIVE_LOCKED: a key is set but the operator has not entered the passcode, so the backend behaves as if there were no key. */
+export type ProviderStatus = { status: "LIVE" | "LIVE_LOCKED" | "OFFLINE"; model: string; fallback: string | null };
+
+/** Why a Meta call was skipped. Counted in memory by the backend's credit governor, so it restarts with the process. */
+export type SavedReason = "duplicate" | "unusable_quality" | "not_candidate" | "cache_hit" | "budget";
+
+/** Credit governor numbers. Cost is an estimate from Meta list prices, summed over LIVE_META executions only. */
+export interface Credits {
+  budgetUsd: number;
+  spentUsd: number;
+  remainingUsd: number;
+  liveCalls: number;
+  cachedCalls: number;
+  saved: { total: number; byReason: Record<SavedReason, number> };
+}
 
 export interface SystemStatus {
   version: string;
@@ -16,6 +30,9 @@ export interface SystemStatus {
   inference: { active: number; concurrency: number };
   gantry: { estop: boolean; fault: string | null; hardware: boolean; status: GantryStatus | null };
   camera: { source: string; online: boolean; lastFrameAgeS: number | null; resolution: string | null; error: string | null; verifiedHardware: boolean };
+  credits: Credits;
+  /** lockEnabled: the backend has a passcode. unlocked: this request carried it (always true when no passcode is set). */
+  live: { lockEnabled: boolean; unlocked: boolean };
   db: boolean;
 }
 
@@ -56,10 +73,13 @@ export interface ToolCallRecord {
   ok: boolean;
   result: unknown;
   error: string | null;
-  phase: "PLANNING" | "EXECUTION" | "REPORTING";
-  by: "MUSE_SPARK" | "OFFLINE_RULE_PARSER" | "OPERATOR" | "SYSTEM";
+  phase: "PLANNING" | "EXECUTION" | "REPORTING" | "ASK";
+  by: "MUSE_SPARK" | "OFFLINE_RULE_PARSER" | "OFFLINE_RECORDS_QUERY" | "OPERATOR" | "SYSTEM";
   at: number;
 }
+
+/** The operator's language for Meta-written text and for Voice Transcribe's language bias. Offline output is English whatever it is. */
+export type Language = "en" | "hi";
 
 export interface MissionRecord {
   id: string;
@@ -75,12 +95,118 @@ export interface MissionRecord {
   timeline: ToolCallRecord[];
   result: Record<string, unknown> | null;
   executor: "TWIN" | "BACKEND" | null;
+  /** the operator's language when the mission was planned; its summary is written in it */
+  language: Language;
 }
 
 export interface InterpretResponse {
   mission: MissionRecord;
   provider: Provider;
   model: string | null;
+}
+
+/** A capture an answer rests on. x, y: gantry cm of the object observed in it, or where the capture was taken when nothing was. label is a target class or "capture". */
+export interface AskCitation {
+  captureId: string;
+  x: number;
+  y: number;
+  label: string;
+}
+
+/** Why an offline records query answered instead of Muse Spark. LIVE_LOCKED is the passcode lock, not a missing key. */
+export type AskFallback = "LIVE_LOCKED" | "NO_KEY" | "BUDGET_EXCEEDED" | "LIVE_META_FAILED" | "NO_ANSWER";
+
+export interface AskResponse {
+  /** `[n]` markers refer to citations[n - 1] */
+  answer: string;
+  citations: AskCitation[];
+  toolCalls: ToolCallRecord[];
+  provider: "MUSE_SPARK" | "OFFLINE_RECORDS_QUERY";
+  model: string | null;
+  /** every Meta execution behind the answer, also when a fallback answered after a call failed */
+  executionIds: string[];
+  /** executions that actually went to Meta; the rest of executionIds were replayed from the cache */
+  requestsSent: number;
+  /** how the Meta calls behind a MUSE_SPARK answer were made; null for an offline answer */
+  classification: ModelExecution["classification"] | null;
+  fallback: AskFallback | null;
+  note: string;
+  droppedCitations: string[];
+  /** the language the answer is written in: offline answers are English whatever was asked for */
+  language: Language;
+}
+
+export type WorkOrderPriority = "P1" | "P2" | "P3";
+
+/** One job for a crew. evidence: capture ids of this mission; location: gantry cm. */
+export interface WorkOrder {
+  id: string;
+  priority: WorkOrderPriority;
+  title: string;
+  location: { x: number; y: number };
+  evidence: string[];
+  action: string;
+  effort: "S" | "M" | "L";
+  rationale: string;
+}
+
+export interface WorkOrdersResponse {
+  orders: WorkOrder[];
+  provider: "MUSE_SPARK" | "OFFLINE_RULES";
+  model: string | null;
+  /** every Meta execution behind the list, also when the offline rules wrote it after a call failed */
+  executionIds: string[];
+  /** executions that actually went to Meta; the rest of executionIds were replayed from the cache */
+  requestsSent: number;
+  /** how the Meta call behind a MUSE_SPARK list was made; null for an offline list */
+  classification: ModelExecution["classification"] | null;
+  /** why the offline rules wrote the list; null when Muse Spark wrote it (or there was nothing to order) */
+  fallback: AskFallback | null;
+  note: string;
+  /** capture ids the model cited that no record holds, and how many of its orders were dropped */
+  droppedEvidence: string[];
+  droppedOrders: number;
+  /** the language the orders are written in: offline orders are English whatever was asked for */
+  language: Language;
+}
+
+export interface RealInstance {
+  box: [number, number, number, number];
+  /** the model's own score; null when it gave none (null is not zero) */
+  confidence: number | null;
+  areaPx: number;
+  polygons: Array<Array<[number, number]>>;
+}
+
+export interface RealSegment {
+  prompt: string;
+  status: "OK" | "EMPTY" | "FAILED" | "SKIPPED_BUDGET";
+  /** null for a replayed (cached) answer: nothing was measured */
+  latencyMs: number | null;
+  error: string | null;
+  instances: RealInstance[];
+}
+
+/** SAM 3.1 on one camera frame. The masks are in the pixels of the frame that was sent (width x height). */
+export interface RealSegmentResponse {
+  width: number;
+  height: number;
+  segments: RealSegment[];
+  /** SAM_3_1 when the model answered at least one phrase; UNAVAILABLE when there is no key, no passcode, or every request failed */
+  provider: "SAM_3_1" | "UNAVAILABLE";
+  model: string | null;
+  /** every execution record of this shutter, cache replays included */
+  executionIds: string[];
+  /** how many of them were requests that went to Meta (live or failed); the rest were replayed from the cache */
+  requestsSent: number;
+  /** how the Meta calls behind the masks were made; null when none succeeded */
+  classification: ModelExecution["classification"] | null;
+  /** the slowest phrase (they run side by side); null when every answer was replayed or none was asked */
+  latencyMs: number | null;
+  /** estimate from Meta list prices over this shutter's live executions; a replay costs 0 */
+  costUsd: number;
+  fallback: "NO_KEY" | "LIVE_LOCKED" | null;
+  note: string;
 }
 
 export interface ImageQuality {
@@ -159,7 +285,8 @@ export interface TranscriptResult {
   model: string;
   sessionId: string;
   audioDurationMs: number;
-  latencyMs: number;
+  /** null when the transcript was replayed from the backend's response cache: nothing was measured. */
+  latencyMs: number | null;
 }
 
 /** Where the audio came from. RECORDED_INPUT is a prepared file, never presented as a live microphone. */
@@ -184,7 +311,11 @@ export interface ModelExecution {
   error: string | null;
   traceId: string | null;
   transport: "META_API" | "MOCK_TRANSPORT";
-  classification: "LIVE_META" | "LIVE_META_FAILED" | "MOCKED";
+  classification: "LIVE_META" | "LIVE_META_FAILED" | "MOCKED" | "CACHED_LIVE" | "CACHED_MOCKED" | "CACHED_UNVERIFIED";
+  /** USD estimate from list prices; 0 for a cache hit. Absent on records written before the credit governor existed. */
+  costUsd?: number;
+  /** a CACHED_* record points at the execution that produced the replayed answer */
+  cachedFrom?: string;
 }
 
 export interface ExecutionLog {
@@ -239,7 +370,7 @@ export interface ReportPathPoint {
 export interface InspectionReport {
   reportVersion: number;
   generatedAt: number;
-  mission: { id: string; instruction: string; provider: Provider; createdAt: number; spec: MissionSpec; planSummary: MissionRecord["planSummary"]; executor: string | null };
+  mission: { id: string; instruction: string; provider: Provider; createdAt: number; spec: MissionSpec; planSummary: MissionRecord["planSummary"]; executor: string | null; language: Language };
   outcome: { status: MissionRecord["status"]; twinResult: Record<string, number | string | boolean> | null; waypointsPlanned: number; waypointsVisited: number | null };
   path: ReportPathPoint[];
   assets: ReportAsset[];

@@ -1,8 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import { ApiError, api, type TwinContext } from "@/lib/api/client";
-import type { CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource } from "@/lib/api/types";
+import { ApiError, api, getPasscode, setPasscode, setRejectedHandler, type TwinContext } from "@/lib/api/client";
+import type { AskResponse, CaptureResult, EventEnvelope, ExecutionLog, HistoryItem, InspectionReport, Language, MissionRecord, Preflight, SystemStatus, TranscriptResult, VoiceInputSource, WorkOrdersResponse } from "@/lib/api/types";
 import { PushToTalk } from "@/lib/audio/wav";
 import { useSimStore } from "@/lib/sim/store";
 import type { CaptureRequest, MissionResult } from "@/lib/sim/types";
@@ -28,17 +28,49 @@ export interface CaptureView {
 interface VoiceState {
   state: "IDLE" | "RECORDING" | "TRANSCRIBING" | "ERROR";
   error?: string;
-  latencyMs?: number;
+  latencyMs?: number | null;
   durationMs?: number;
 }
 
 /** The last Voice Transcribe result and where its audio came from, so the UI never shows a recorded file as a live voice. */
 export type TranscriptView = TranscriptResult & { source: VoiceInputSource };
 
+/** One question to the inspector about a stored mission, from the moment it is sent. */
+export interface AskView {
+  id: number;
+  missionId: string;
+  question: string;
+  /** the language asked for; the answer says which language it is actually in */
+  language: Language;
+  status: "PENDING" | "DONE" | "FAILED";
+  response?: AskResponse;
+  error?: string;
+  /** the reveal animation has played, so a remount shows the answer at once */
+  revealed: boolean;
+}
+
+/** The work orders of one mission, from the moment the operator asks for them. */
+export interface WorkOrdersView {
+  status: "PENDING" | "DONE" | "FAILED";
+  /** the language asked for; the response says which language it is actually in */
+  language: Language;
+  response?: WorkOrdersResponse;
+  error?: string;
+}
+
+const MAX_ASKS = 20;
+let askSeq = 0;
+
 /** Prepared audio of the demo instruction (synthetic speech, macOS `say`). Always labelled RECORDED_INPUT. */
 export const RECORDED_INSTRUCTION_URL = "/demo/instruction.wav";
 
+/** Where this browser remembers the operator's language. localStorage: per viewer, across tabs and visits. */
+export const LANGUAGE_KEY = "aqua.language";
+
 let interpretCtrl: AbortController | null = null;
+let statusInflight: { sent: string | null; done: Promise<void> } | null = null;
+/** Numbers the status reads. Only the newest may write: an older read that lands last would show the state from before an unlock or re-lock. */
+let statusSeq = 0;
 
 interface MissionStore {
   backend: BackendState;
@@ -47,6 +79,8 @@ interface MissionStore {
   /** wall-clock ms of the last successful status read */
   lastStatusOkAt: number | null;
   instruction: string;
+  /** the operator's language for voice, plans and summaries; "en" until loadLanguage has read this browser's choice */
+  language: Language;
   voice: VoiceState;
   transcript: TranscriptView | null;
   preflight: Preflight | null;
@@ -62,14 +96,30 @@ interface MissionStore {
   report: InspectionReport | null;
   reportError: string | null;
   history: HistoryItem[];
+  /** the question being typed or spoken in "Ask the inspector" */
+  askDraft: string;
+  /** questions to the inspector, oldest first, across missions */
+  asks: AskView[];
+  /** work orders by mission id */
+  workOrders: Record<string, WorkOrdersView>;
   events: EventEnvelope[];
+  /** the unlock dialog is open */
+  unlockOpen: boolean;
+  /** why a saved passcode was forgotten, shown in the unlock dialog until a passcode works */
+  lockNotice: string | null;
+  /** wall-clock ms until which the backend refuses passcode attempts (429 Retry-After), or null */
+  unlockBlockedUntil: number | null;
 
   setBackend: (b: BackendState) => void;
   refreshStatus: () => Promise<void>;
   onEvent: (e: EventEnvelope) => void;
   setInstruction: (s: string) => void;
+  setLanguage: (l: Language) => void;
+  /** Reads the saved language once the page is mounted (the server render and the first client render are both "en"). */
+  loadLanguage: () => void;
   startVoice: () => Promise<void>;
-  stopVoice: () => Promise<void>;
+  /** `target` is where the transcript goes: the mission instruction (default) or the question box of "Ask the inspector". */
+  stopVoice: (target?: "instruction" | "ask") => Promise<void>;
   /** Sends the prepared recording through Voice Transcribe. Returns the transcript, or null with voice.error set. */
   transcribeRecorded: () => Promise<string | null>;
   refreshEvidence: () => Promise<void>;
@@ -88,6 +138,17 @@ interface MissionStore {
   finishMission: (result: MissionResult) => Promise<void>;
   loadReport: (missionId: string) => Promise<void>;
   loadHistory: () => Promise<void>;
+  setAskDraft: (s: string) => void;
+  /** Sends a question about the shown report's mission. One at a time; a failed one puts its text back in the box. */
+  ask: (question: string) => Promise<void>;
+  markAskRevealed: (id: number) => void;
+  /** Asks the backend for the shown report's work orders: Muse Spark when live, the offline rules otherwise. An explicit action, so credits are spent only on it. */
+  generateWorkOrders: () => Promise<void>;
+  setUnlockOpen: (open: boolean) => void;
+  /** Checks a passcode with the backend and, if it works, keeps it for this tab. `error` is set when it did not; `blocked`: the attempt limit was hit, so the wait is in `unlockBlockedUntil`. */
+  unlock: (passcode: string) => Promise<{ ok: boolean; error?: string; blocked?: boolean }>;
+  /** Forgets this tab's passcode, so live mode is locked again for this browser. */
+  relock: () => void;
 }
 
 const MAX_CAPTURES = 60;
@@ -116,6 +177,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   lastStatusOkAt: null,
   system: null,
   instruction: "",
+  language: "en",
   voice: { state: "IDLE" },
   transcript: null,
   preflight: null,
@@ -130,17 +192,36 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   report: null,
   reportError: null,
   history: [],
+  askDraft: "",
+  asks: [],
+  workOrders: {},
   events: [],
+  unlockOpen: false,
+  lockNotice: null,
+  unlockBlockedUntil: null,
 
   setBackend: (backend) => set({ backend }),
 
-  refreshStatus: async () => {
-    try {
-      set({ system: await api.status(), backend: "ONLINE", lastStatusOkAt: Date.now() });
-    } catch {
-      // a stale status would keep showing providers LIVE behind an unreachable backend
-      set({ backend: "OFFLINE", system: null });
-    }
+  refreshStatus: () => {
+    // Overlapping reads (mount, socket open, poll) share one request while the passcode is the same: each one that carries a
+    // rejected passcode is a failed attempt on the backend.
+    const sent = getPasscode();
+    if (statusInflight?.sent === sent) return statusInflight.done;
+    const seq = ++statusSeq;
+    const entry: NonNullable<typeof statusInflight> = { sent, done: Promise.resolve() };
+    entry.done = (async () => {
+      try {
+        const system = await api.status();
+        if (seq === statusSeq) set({ system, backend: "ONLINE", lastStatusOkAt: Date.now() });
+      } catch {
+        // a stale status would keep showing providers LIVE behind an unreachable backend
+        if (seq === statusSeq) set({ backend: "OFFLINE", system: null });
+      } finally {
+        if (statusInflight === entry) statusInflight = null;
+      }
+    })();
+    statusInflight = entry;
+    return entry.done;
   },
 
   onEvent: (e) => {
@@ -153,6 +234,24 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   },
 
   setInstruction: (instruction) => set({ instruction }),
+
+  setLanguage: (language) => {
+    set({ language });
+    try {
+      localStorage.setItem(LANGUAGE_KEY, language);
+    } catch {
+      /* storage blocked: the choice still holds for this page */
+    }
+  },
+
+  loadLanguage: () => {
+    try {
+      const saved = localStorage.getItem(LANGUAGE_KEY);
+      if (saved === "en" || saved === "hi") set({ language: saved });
+    } catch {
+      /* storage blocked: English, or whatever was chosen on this page */
+    }
+  },
 
   startVoice: async () => {
     if (!recorder || !PushToTalk.supported()) {
@@ -167,13 +266,15 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     }
   },
 
-  stopVoice: async () => {
+  stopVoice: async (target = "instruction") => {
     if (!recorder || get().voice.state !== "RECORDING") return;
     set({ voice: { state: "TRANSCRIBING" } });
     try {
       const wav = await recorder.stop();
-      const r = await api.transcribe(wav, "LIVE_MICROPHONE");
-      set({ instruction: r.transcript, transcript: { ...r, source: "LIVE_MICROPHONE" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
+      const r = await api.transcribe(wav, "LIVE_MICROPHONE", get().language);
+      const voice: VoiceState = { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs };
+      // a spoken question is not the mission instruction: it must not become the voice step of the agent chain
+      set(target === "ask" ? { askDraft: r.transcript, voice } : { instruction: r.transcript, transcript: { ...r, source: "LIVE_MICROPHONE" }, voice });
     } catch (e) {
       recorder.cancel();
       set({ voice: { state: "ERROR", error: msg(e) } });
@@ -185,7 +286,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     try {
       const res = await fetch(RECORDED_INSTRUCTION_URL);
       if (!res.ok) throw new Error(`recorded instruction missing (HTTP ${res.status})`);
-      const r = await api.transcribe(await res.blob(), "RECORDED_INPUT");
+      const r = await api.transcribe(await res.blob(), "RECORDED_INPUT", get().language);
       set({ instruction: r.transcript, transcript: { ...r, source: "RECORDED_INPUT" }, voice: { state: "IDLE", latencyMs: r.latencyMs, durationMs: r.audioDurationMs } });
       void get().refreshEvidence();
       return r.transcript;
@@ -210,7 +311,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     const ctrl = (interpretCtrl = new AbortController());
     set({ interpreting: true, interpretError: null, canFallBack: false, actionError: null });
     try {
-      const r = await api.interpret(text, twinContext(), offline, ctrl.signal);
+      const r = await api.interpret(text, twinContext(), offline, ctrl.signal, get().language);
       set({ mission: r.mission, interpreting: false });
       void get().refreshEvidence();
       return r.mission;
@@ -372,4 +473,79 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
       /* history is optional; the backend state chip already says why */
     }
   },
+
+  setAskDraft: (askDraft) => set({ askDraft }),
+
+  ask: async (question) => {
+    const q = question.trim();
+    const missionId = get().report?.mission.id;
+    if (q.length < 3 || !missionId || get().asks.some((a) => a.status === "PENDING")) return;
+    const id = ++askSeq;
+    const language = get().language;
+    const patch = (p: Partial<AskView>) => set({ asks: get().asks.map((a) => (a.id === id ? { ...a, ...p } : a)) });
+    set({ asks: [...get().asks.slice(1 - MAX_ASKS), { id, missionId, question: q, language, status: "PENDING", revealed: false }], askDraft: "" });
+    try {
+      patch({ status: "DONE", response: await api.ask(missionId, q, language) });
+      void get().refreshEvidence(); // the answer's executions are in the log now
+    } catch (e) {
+      patch({ status: "FAILED", error: msg(e), revealed: true });
+      if (!get().askDraft) set({ askDraft: q });
+    }
+  },
+
+  markAskRevealed: (id) => set({ asks: get().asks.map((a) => (a.id === id ? { ...a, revealed: true } : a)) }),
+
+  generateWorkOrders: async () => {
+    const missionId = get().report?.mission.id;
+    if (!missionId || get().workOrders[missionId]?.status === "PENDING") return;
+    const language = get().language;
+    const patch = (v: WorkOrdersView) => set({ workOrders: { ...get().workOrders, [missionId]: v } });
+    // the previous list stays on screen while the new one is written
+    patch({ ...get().workOrders[missionId], status: "PENDING", language });
+    try {
+      patch({ status: "DONE", language, response: await api.workOrders(missionId, language) });
+      void get().refreshEvidence(); // the call's execution is in the log now
+    } catch (e) {
+      patch({ ...get().workOrders[missionId], status: "FAILED", language, error: msg(e) });
+    }
+  },
+
+  setUnlockOpen: (unlockOpen) => set({ unlockOpen }),
+
+  unlock: async (passcode) => {
+    try {
+      const { unlocked } = await api.unlock(passcode);
+      if (!unlocked) return { ok: false, error: "That passcode was not accepted." };
+      setPasscode(passcode);
+      // the status read proves it: if the backend still says locked, the client forgets the passcode again
+      await get().refreshStatus();
+      const live = get().system?.live;
+      if (live?.lockEnabled && !live.unlocked) {
+        set({ lockNotice: null });
+        return { ok: false, error: "The backend accepted the passcode, then refused it. Enter it again." };
+      }
+      set({ unlockOpen: false, lockNotice: null, unlockBlockedUntil: null });
+      void get().refreshEvidence();
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 429) {
+        const wait = e.retryAfterS ?? 60;
+        set({ unlockBlockedUntil: Date.now() + wait * 1000 });
+        return { ok: false, blocked: true };
+      }
+      return { ok: false, error: msg(e) };
+    }
+  },
+
+  relock: () => {
+    setPasscode(null);
+    set({ unlockOpen: false, lockNotice: null });
+    void get().refreshStatus();
+  },
 }));
+
+// A rejected passcode is forgotten inside the API client; the store only explains it and re-reads the status.
+setRejectedHandler((why, refresh) => {
+  useMissionStore.setState({ lockNotice: why });
+  if (refresh) void useMissionStore.getState().refreshStatus();
+});

@@ -25,7 +25,8 @@ from ..config import Settings
 from ..db import Repository, new_id
 from ..events import EventBus
 from ..geometry import footprint_half_cm, pixel_to_gantry
-from ..meta.client import MetaAPIError
+from ..meta.client import MetaAPIError, MetaBudgetExceeded
+from ..meta.governor import Governor
 from ..meta.sam import Sam, SamInstance
 from ..meta.spark import Spark
 from ..schemas import (
@@ -34,6 +35,7 @@ from ..schemas import (
     CaptureMeta,
     CaptureResult,
     FrameReasoning,
+    ImageQuality,
     Observation,
     SegInstance,
     Segmentation,
@@ -55,6 +57,11 @@ FALLBACK_PHRASES: dict[str, str] = {
     "debris": "rock",
 }
 MAX_PHRASES = 3
+
+
+def _ms(latency: float | None) -> float | None:
+    """A cached answer has no latency: None, never 0."""
+    return None if latency is None else round(latency, 1)
 
 
 def mask_polygons(mask: np.ndarray, epsilon: float = 1.2) -> list[list[tuple[int, int]]]:
@@ -85,8 +92,9 @@ class MissionPerceptionState:
 
 
 class PerceptionPipeline:
-    def __init__(self, settings: Settings, repo: Repository, events: EventBus, spark: Spark | None, sam: Sam | None):
+    def __init__(self, settings: Settings, repo: Repository, events: EventBus, spark: Spark | None, sam: Sam | None, governor: Governor):
         self.settings = settings
+        self.gov = governor  # the one governor of the process: a second would keep its own saved-calls counter
         self.repo = repo
         self.events = events
         self.spark = spark
@@ -104,7 +112,25 @@ class PerceptionPipeline:
     def cancel(self, mission_id: str) -> int:
         return self.queue.cancel_mission(mission_id)
 
-    async def process(self, meta: CaptureMeta, jpeg: bytes, idmask_png: bytes | None) -> CaptureResult:
+    def _planned_calls(self, meta: CaptureMeta) -> int:
+        """SAM requests a capture would have made: one per prompt or reasoned phrase, else one per target (at most MAX_PHRASES)."""
+        st = self._missions.get(meta.mission_id)
+        return len(meta.prompts or (st.phrases if st else [])) or min(MAX_PHRASES, len(meta.targets) or 2)
+
+    def _gate(self, meta: CaptureMeta, quality: ImageQuality) -> tuple[str, str] | None:
+        """Cascade gate before any Meta call: (saved reason, note) to skip, None to go ahead. A mission capture reaches SAM only
+        if the frame is usable and it is a waypoint capture or a re-observation of a candidate (a detection to look at again).
+        A MANUAL capture is an explicit operator action, so it always passes."""
+        if meta.reason == "MANUAL":
+            return None
+        if quality.band == "UNRELIABLE":
+            return "unusable_quality", f"SAM skipped: frame quality is unusable (visibility estimate {quality.visibility_estimate:.2f})"
+        if meta.reason == "REOBSERVE" and not meta.detections:
+            return "not_candidate", "SAM skipped: re-observation with no candidate in view"
+        return None
+
+    async def process(self, meta: CaptureMeta, jpeg: bytes, idmask_png: bytes | None, live: bool = True) -> CaptureResult:
+        """live=False is a locked request: it takes the offline path even when Meta credentials are configured."""
         img = decode(jpeg)
         h, w = img.shape[:2]
         capture_id = new_id("cap")
@@ -149,15 +175,22 @@ class PerceptionPipeline:
         if not meta.camera_online:
             notes.append("camera offline: nothing to analyse")
         elif duplicate_of:
+            if self.live and live:
+                self.gov.record_saved("duplicate", len(reusable))
             for s in reusable:
                 reused = s.model_copy(update={"id": new_id("seg"), "capture_id": capture_id, "status": "REUSED", "latency_ms": None})
                 self.repo.save_segmentation(reused)
                 segmentations.append(reused)
-        elif self.live:
-            reasoning, segmentations, observations = await self._live(meta, capture_id, jpeg, w, h, ids)
+        elif self.live and live:
+            skip = self._gate(meta, quality)
+            if skip:
+                self.gov.record_saved(skip[0], self._planned_calls(meta))
+                notes.append(skip[1])
+            else:
+                reasoning, segmentations, observations = await self._live(meta, capture_id, jpeg, w, h, ids)
         else:
             segmentations, observations = self._offline(meta, capture_id, w, h, ids)
-            reasoning = FrameReasoning(provider="UNAVAILABLE", scene_summary="", phrases=[], error="MODEL_API_KEY not configured")
+            reasoning = FrameReasoning(provider="UNAVAILABLE", scene_summary="", phrases=[], error="MODEL_API_KEY not configured" if not self.live else "live mode locked")
 
         if reasoning:
             self.repo.update_capture(capture_id, reasoning=reasoning.model_dump(by_alias=True))
@@ -195,8 +228,10 @@ class PerceptionPipeline:
                 if t not in named and len(phrases) < MAX_PHRASES:
                     phrases.append({"phrase": FALLBACK_PHRASES[t], "target_class": t, "rationale": "fallback phrase for an unmentioned target"})
             st.phrases, st.reasoned = phrases, True
-            return FrameReasoning(provider="MUSE_SPARK", scene_summary=str(data.get("scene_summary", ""))[:500], phrases=phrases, latency_ms=round(latency, 1))
+            return FrameReasoning(provider="MUSE_SPARK", scene_summary=str(data.get("scene_summary", ""))[:500], phrases=phrases, latency_ms=_ms(latency))
         except (MetaAPIError, BudgetExhausted, asyncio.TimeoutError) as e:
+            if isinstance(e, BudgetExhausted):
+                self.gov.record_saved("budget")
             st.phrases = [{"phrase": FALLBACK_PHRASES[t], "target_class": t, "rationale": "fallback: frame reasoning failed"} for t in targets][:MAX_PHRASES]
             return FrameReasoning(provider="UNAVAILABLE", scene_summary="", phrases=st.phrases, error=str(e)[:300])
 
@@ -207,17 +242,20 @@ class PerceptionPipeline:
         try:
             self.queue.charge(meta.mission_id, "sam", self.settings.max_sam_requests_per_mission)
         except BudgetExhausted as e:
+            self.gov.record_saved("budget")
             return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="SKIPPED_BUDGET", latency_ms=None, error=str(e), instances=[])
         key = f"sam:{hashlib.sha1(jpeg).hexdigest()}:{prompt}"
         try:
             instances, latency = await self.queue.run(meta.mission_id, key, lambda: self.sam.segment(jpeg, prompt, w, h, ref=f"capture:{capture_id}"))  # type: ignore[union-attr]
         except asyncio.CancelledError:
             raise
+        except MetaBudgetExceeded as e:  # already counted as saved by the governor
+            return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="SKIPPED_BUDGET", latency_ms=None, error=str(e), instances=[])
         except (MetaAPIError, asyncio.TimeoutError) as e:
             msg = str(e) or "timed out"
             return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="FAILED", latency_ms=None, error=msg[:300], instances=[])
         out = [self._instance(meta, f"{seg_id}:{inst.object_id}", prompt, target, inst, w, h, ids) for inst in instances]
-        return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="OK" if out else "EMPTY", latency_ms=round(latency, 1), error=None, instances=out)
+        return Segmentation(id=seg_id, capture_id=capture_id, provider="SAM_3_1", prompt=prompt, status="OK" if out else "EMPTY", latency_ms=_ms(latency), error=None, instances=out)
 
     def _instance(self, meta: CaptureMeta, iid: str, prompt: str, target: str | None, inst: SamInstance, w: int, h: int, ids: np.ndarray | None) -> SegInstance:
         x0, y0, x1, y1 = inst.box

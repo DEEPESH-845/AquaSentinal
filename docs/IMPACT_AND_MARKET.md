@@ -1,8 +1,26 @@
 # Impact and market
 
 Status of this document: a problem and market hypothesis, not validated research.
-No customer interviews have been done, no market figures have been sourced, and no performance improvement has been measured with operators.
-Every claim below is either a description of how the prototype works or an explicitly labelled hypothesis.
+No customer interviews have been done, and no performance improvement has been measured with operators.
+Three context figures are sourced with a URL (next section); every other market figure is deliberately left out because no source was found.
+Every claim below is a sourced figure, a description of how the prototype works, or an explicitly labelled hypothesis.
+
+## The need of the hour: sourced context
+
+Only figures with a source are listed.
+Where no source was found, the gap is stated instead of filled.
+
+| Context | Figure | Source |
+|---|---|---|
+| Who depends on Indian fisheries and aquaculture | About 3 crore fishers and fish farmers | PIB, 12 Jan 2026: https://www.pib.gov.in/PressReleseDetailm.aspx?PRID=2213532&reg=3&lang=2 |
+| Scale | India is the world's second-largest fish producer with 8% of global output; production rose to 197.75 lakh tonnes in FY 2024-25 from 95.79 lakh tonnes in FY 2013-14 | Same PIB release |
+| Diver risk (United States, not India) | 39 fatal occupational injuries among commercial divers in 2011 to 2017, counted by the US Bureau of Labor Statistics and reported on the NIOSH page | https://www.cdc.gov/niosh/maritime/industries/commercial_diving.html |
+| Why murky water is a vision problem | Light absorption and scattering in water degrade underwater images; surveyed with experimental comparison of enhancement and restoration methods | Wang et al., arXiv 1907.03246: https://arxiv.org/abs/1907.03246 |
+
+Not sourced, so not claimed: the cost of an underwater inspection in India, diver fatality or injury figures for India, the size of the land-based aquaculture or treatment-plant inspection market, and how much inspection time murk costs operators.
+The diver figure is American and says nothing about Indian practice; it is here only to show that putting people in the water is a known occupational risk.
+
+Why now, as a design argument and not a market figure: one set of Meta models now covers the whole chain (Voice Transcribe for Hindi and English speech, Muse Spark for planning with tools and for grounded answers, SAM 3.1 for outlines), so a single product can go from a spoken sentence to a cited work order.
 
 ## Problem
 
@@ -19,6 +37,11 @@ The resulting record is usually video plus notes: hard to search, hard to compar
 - SAM 3.1 segments the objects named for the mission; observations are tied to persistent assets with gantry coordinates.
 - A deterministic controller slows, pauses and re-observes when visibility drops, so the record does not silently fill with unusable frames.
 - The report lists what was found, where, from which frame, with which model and confidence, and which strips could not be inspected reliably.
+- The operator can speak and read in Hindi or English (Meta models only; offline mode says so).
+- Ask the Inspector answers questions about a mission from its stored records and cites captures; clicking a citation moves the twin to that asset.
+- Findings become prioritised work orders with their evidence frames, printable one per page.
+- The credit governor (response cache, cascade gating, USD budget cap, passcode live lock) keeps Meta spend bounded, and a header chip shows it.
+- The real water camera takes one frame from a phone or laptop camera and runs SAM 3.1 on it; without the Meta key it says "SAM 3.1 needs the Meta key".
 
 ## Initial market: fixed-rail inspection of tanks and basins
 
@@ -58,9 +81,10 @@ AquaSentinal replaces steps 2 to 5 with an approved plan, adaptive execution and
 
 Turn a spoken inspection request into a bounded, repeatable scan whose record says what was seen, where, how confidently, and what could not be seen.
 
-## Measurable impact hypotheses
+## Measurable impact targets
 
-None of these has been measured with real operators. The prototype can measure the simulated versions today.
+These are targets, not results.
+None of them has been measured with real operators. The prototype can measure the simulated versions today.
 
 | Metric | Definition | How it would be measured | What exists today |
 |---|---|---|---|
@@ -86,11 +110,11 @@ Model cost per inspection can be estimated from the usage tracker once live call
 
 - No regulatory approval, safety certification or commercial deployment.
 - No physical hardware run: the gantry driver has only been tested against a fake controller.
-- No live Meta model run (docs/META_USAGE_EVIDENCE.md).
+- No live Meta model run (docs/META_USAGE_EVIDENCE.md): no MODEL_API_KEY has been set, so no recorded live run exists yet.
 - No measured improvement over current practice.
 
 ## Next steps to make this credible
 
 1. Five conversations with aquaculture or treatment-plant operators to confirm or kill the workflow and buyer assumptions.
-2. Source market size figures for land-based aquaculture and treatment-plant inspection, with citations.
+2. Source Indian figures for inspection cost and diver safety, and market size for land-based aquaculture and treatment-plant inspection, with citations (the context table above has only the three figures that could be sourced).
 3. Run the live Meta evaluation and one physical tank run, then repeat the time-to-plan comparison with at least three people.

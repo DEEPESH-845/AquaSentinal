@@ -22,7 +22,7 @@ No routine test calls a paid API: Meta is an `httpx.MockTransport` and serial is
 - Perception maths: visibility monotonic in turbidity and light, ramp and dropout schedules.
 - Cross-language fixtures: TypeScript trajectory and projection must equal `shared/fixtures/*.json`.
 
-## Backend (`backend/tests/`, 56 tests)
+## Backend (`backend/tests/`, 143 tests)
 
 | File | Covers |
 |---|---|
@@ -33,6 +33,11 @@ No routine test calls a paid API: Meta is an `httpx.MockTransport` and serial is
 | `test_api.py` | Health, status and config without secrets; judge preflight lists missing credentials and unverified live Meta as blockers and identifies the simulated gantry and camera; offline mission lifecycle, transitions, captures, duplicate reuse and its guards (different inputs, failed results), injected segmentation failure, completion, JSON and Markdown report, frames, history; capture validation and voice offline; persistence and asset identity across restarts; event socket (invalid message, ping, replay), command socket (invalid, out of bounds, e-stop), start refused while latched, telemetry socket |
 | `test_tracking.py` | Two doubtful cable sightings and one confident debris sighting at the same spot make one asset labelled debris; confident valve and pipe segment at one centre stay two assets; an asset keeps its id across two missions |
 | `test_quality.py` | The image-quality estimate rises with frame contrast, a clear synthetic frame and a moderately murky one read GOOD, and a flat one reads UNRELIABLE |
+| `test_governor.py` | The budget refuses before any transport call, counts only live spend, survives a restart and cannot be overshot by concurrent requests; a cache hit replays the stored answer as `CACHED_LIVE` (or `CACHED_MOCKED`, never `CACHED_LIVE`) with no transport call and no usage inflation, for chat, streaming and multipart; the cache key changes with image bytes, model and endpoint but not key order; only complete successes are cached; the cascade skips duplicates, unusable frames and non-candidates and counts why; Meta routes need the passcode when one is set; unlock limits failed attempts per client address and across all addresses, a rotating leftmost `X-Forwarded-For` does not evade it, and comparison is constant time; neither the passcode nor the key appears in config, reprs or status |
+| `test_language.py` | `languageBias` follows the language while keywords stay; the transcribe route forwards it; Hindi adds the Hindi instruction to prompts and English adds nothing; the planner accepts Hindi and Hinglish and writes the explanation in Hindi; a Hindi mission's summary is written in Hindi; offline Hindi stays English and is not machine-translated; a locked Hindi request falls back to the English parser |
+| `test_ask.py` | The ASK phase offers exactly five read-only tools and every mutating tool is refused; tool arguments are validated and scoped to the mission; comparison with the previous mission; citations are numbered and unknown ids dropped; offline intents answer from the records; the live tool loop answers with validated citations and logs every turn; a Hindi question is answered in Hindi; an answer that read no record is sent back; the turn limit; a failed call, a locked ask, no key and an exhausted budget all answer offline and say why; a blank question is rejected |
+| `test_workorders.py` | The order schema; unknown evidence, invalid rows and unevidenced orders are dropped and never repaired; the offline rule table; one structured-output call that is grounded, logged and cached; a Hindi request is a request of its own; a reply with no surviving order, a malformed envelope, a failed call, a lock and an exhausted budget all fall back with a label; tracks outside the gantry travel are clamped; a second capture of one object adds evidence, not an order; a mission with no observation makes no request |
+| `test_realwater.py` | Prompts are one or two, trimmed and asked once; the route refuses bad prompts and bad frames before anything is sent; no key and locked answer with a label and draw nothing; one SAM request per prompt returns polygons, boxes, confidences and the execution record; a repeated prompt costs one request; one failed phrase does not hide the other; the response cache serves the same shutter with no request, cost or latency; a half-replayed shutter counts one request sent; the budget cap refuses both phrases before any request |
 | `test_integration.py` | Voice to report with mocked Meta: transcription, Spark tool calls, plan, capture, frame reasoning, three SAM requests, IoU against the ID pass, SAM observations, Spark summary, usage accounting; the execution log holds eight MOCKED records with references only (no key, image or instruction text) and the preflight does not count them as live connectivity; a failed call is logged with its status; unsafe model output never becomes a mission; Spark failure reported, explicit offline fallback; SAM rate limit and 400 isolated per request; backend executor on the simulated gantry with a pause in murky frames and an emergency stop |
 
 ## Measured strategy comparison
@@ -76,8 +81,11 @@ Observations from these numbers:
 ## Browser tests (`e2e/`)
 
 `playwright.config.ts` starts `next dev` and the FastAPI backend in offline SIMULATION mode (no `MODEL_API_KEY`, hardware disabled), and reuses a server that is already listening on port 3000 or 8000.
+When port 3000 belongs to something else, copy the config to an untracked `playwright.tmp.config.ts` that uses `next dev -p 3100`, base URL `http://localhost:3100` and `CORS_ORIGINS=http://localhost:3100` on the backend, and pass it with `-c`; delete it afterwards.
 When it starts the backend itself it deletes `e2e/.backend-data` first, so each run begins with an empty database; that folder sits outside `e2e/.results` because Playwright empties the results folder after the servers start.
-Tests run in one worker, with a 120 s default timeout and 15 s per assertion.
+The config runs one worker, with a 120 s default timeout and 15 s per assertion.
+`--workers=2` is supported and halves the wall time, but both workers share one backend, whose e-stop latch and tracked assets are global.
+A spec that depends on either must not assume the other worker or an earlier spec left them alone: `credits.spec.ts` mocks the status it measures, and `workorders.spec.ts` compares an order's location with the position the report tracks instead of the position the seed posted.
 
 `e2e/lab.ts` is the shared fixture.
 It fails any test with a console error, page error or failed request, unless the test lists the expected ones in `audit.allow`.
@@ -99,18 +107,44 @@ Actions go through the DOM; the store is used to read results and to skip waitin
 | `intelligence.spec.ts` | Scene 08 offline: preflight says live Meta is not verified and why, the execution log is empty, no step carries a LIVE META tag, an offline plan is tagged OFFLINE FALLBACK and the plan DETERMINISTIC; a mocked execution is shown as MOCKED, never live; every scene's provenance badge matches the registry and inherited scenes never say HACKATHON-BUILT |
 | `demo.spec.ts` | The judge demo opens on scene 08 and runs INTRO, COMMAND, PLAN, SCAN, PERCEIVE, ADAPT and REPORT in order (offline, COMMAND says the instruction is typed because Voice Transcribe needs a key), with the engine fast-forwarded in slices while the mission runs; the plan comes from the backend (`demo.usedFixture` is false), the mission pauses at least once and completes, the backend report holds every capture, and the REPORT card shows the mission metrics; pause freezes the demo clock and replay and exit return to a clean lab |
 | `redteam.spec.ts` | Seeded random clicks across scenes and buttons; hostile text in the instruction box (markup, injection strings, control characters, the 2000 character limit); number fields and sliders with out-of-range and garbage values; reset during a mission ends it on both sides and the lab can plan again; e-stop spam ends with a way out whenever either latch is set; reload during a mission and demo interrupts |
-| `responsive.spec.ts` | At 390 x 844, 768 x 1024, 1024 x 768, 1280 x 720, 1440 x 900 and 1920 x 1080: no horizontal overflow, the AQUASENTINAL brand is whole, Run demo, Reset lab and Emergency stop are inside the viewport, and on every scene the card is inside the viewport and does not cover the camera feed |
+| `responsive.spec.ts` | At 320 x 568, 390 x 844, 667 x 375, 844 x 390, 900 x 700, 768 x 1024, 1024 x 768, 1280 x 720, 1440 x 900, 1920 x 1080 and 2560 x 1440: no horizontal overflow, the AQUASENTINAL brand is whole, Run demo, Reset lab and Emergency stop are inside the viewport, and on every scene the card is inside the viewport, does not cover the camera feed and the scene strip fits without scrolling |
 | `visual.spec.ts` | One screenshot per scene at 1440 x 900 in the default lab state, with a 4 percent pixel tolerance because the 3D view is software-rendered |
 | `refinement.spec.ts` | Card and telemetry collapse and expand, F and the focus button toggle both repeatedly; the guided tour steps through nine steps by button and arrow key, switches scenes, reports "waiting" until the user really plans a mission and "planned" after, lets the controls under the spotlight work, finishes, restarts and closes on Escape; with the backend unreachable the Mode and AI chips read UNKNOWN and the health panel has six UNKNOWN rows and no healthy one; the mission state strip moves IDLE, READY, INTERPRETING, FAILED on cancel, then AWAITING_APPROVAL; perception view modes switch by mouse and arrow key, the compare divider is a range input, and a populated Perception card stays clear of the feed column; the gantry plan view jogs from the keyboard without switching scenes |
-| `walkthrough.spec.ts` | `/walkthrough` renders all seven sections; scrolling into section 05 and its range input both change the twin's turbidity; the call to action opens mission control; three client-side round trips leave the same ScrollTrigger count on every visit, none on `/`, and the twin's turbidity restored |
+| `walkthrough.spec.ts` | `/walkthrough` renders all eight sections; scrolling into section 06 and its range input both change the twin's turbidity; the call to action opens mission control; three client-side round trips leave the same ScrollTrigger count on every visit, none on `/`, and the twin's turbidity restored |
+| `credits.spec.ts` | The credit chip in the header: no key, within budget, amber above 80 percent, red when exhausted, unknown when the backend is unreachable, a spend under a tenth of a cent not shown as zero; the popover (counts, saved calls by reason, Escape, outside click, focus return); the unlock dialog (wrong passcode refused and forgotten, right passcode kept in `sessionStorage` only and sent as `X-Aqua-Passcode`, never in a URL or `localStorage`, 429 with a countdown, a rotated passcode forgotten, a 403 from a model route forgets it, a 429 from a model route does not, a status read that began before an unlock cannot overwrite it); the lock row in the popover wherever the header draws no AI chip; the header at every 20 px from 320 to 2560 px and one pixel either side of each breakpoint, with the widest chip text, an exhausted budget and a latched e-stop, never overflowing, clipping the brand or overlapping a control |
+| `language.spec.ts` | EN is the default and Hindi is one click or arrow key away; the choice is remembered in this browser and a bad saved value is ignored; with storage blocked the choice holds for the session; after a reload with Hindi saved the indicator sits under the selected option once the Devanagari font has loaded; the language travels with voice and planning requests; offline output carries `Hindi needs Meta models` while Hindi is selected, a live Hindi plan does not; a template summary is labelled and a Meta summary in Hindi is marked `lang=hi`; the report's instruction note is marked `lang=hi` only when written in Devanagari; the control and label fit at 320, 390 and 1440 px |
+| `ask.spec.ts` | Ask the inspector: the offline records query answers from the stored mission with citations that open in the twin; Hindi stays English offline and says so; a mocked live answer shows provenance, numbered claims, citations and the logged requests; `CACHED LIVE`, `MOCKED` and Hindi answers are labelled; a locked backend reads as locked, a budget refusal says so, a failed request returns the question to the box; an unknown capture gets no broken thumbnail; keyboard access; push-to-talk fills the question box and not the mission instruction; layout from 320 to 2560 px |
+| `workorders.spec.ts` | Work orders: one click writes the orders from the rule table with the evidence frames loaded from the backend; the print button calls `window.print` and the print rules leave white paper, black text and one order per page; a mocked live Muse Spark list shows its provenance and what was dropped, and Hindi is asked for in Hindi; a locked backend reads as locked; a failed request is shown and the button works again |
+| `realcam.spec.ts` | Real water camera with Chromium's fake capture device: the shutter sends one downscaled JPEG and the masks are drawn over the still with latency, cost and provider; at most two prompts; an uploaded photo is downscaled to 1024 px; no key and locked say so and draw nothing; a failed request keeps the still; camera unavailable and no camera API leave upload working; an unencodable frame is reported and not sent; the dialog is keyboard-modal and releases the camera when it closes; the header camera button and the dialog fit from 320 to 2560 px |
 | `backend-offline.spec.ts` | With every backend request failing: the twin keeps working, the UI says the backend is down and refuses to plan, and captures are kept locally and labelled |
 
 Commands:
 
 ```bash
-npx playwright test                  # whole suite, about 8 minutes, most of it the demo
+npx playwright test                  # whole suite, 151 tests, about 20 minutes with --workers=2 on a loaded laptop
 npx playwright test e2e/estop.spec.ts
 npm run e2e:update                   # rewrite the screenshot baselines in e2e/__screenshots__
 ```
 
 Baselines are only valid for the machine and browser that produced them: review the changed images before committing them, and regenerate them after a deliberate layout change.
+
+## Last full run (2026-11-05, feat/meta-hero)
+
+151 tests with `--workers=2`: 147 passed and 4 failed in 19.8 minutes.
+The four were one header-fit test, one stale label count and two order-dependent position checks; none was a regression in what the spec set out to prove.
+They are fixed in the specs and the header, and the specs they live in were re-run afterwards (see the task 12 report for which).
+The full suite was not repeated after the fixes.
+Visual specs passed within their 4 percent tolerance, so the baselines were not regenerated; the header, scene 05 and scene 07 now differ from them by less than that.
+
+## Production build and smoke flow
+
+`NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 npm run build` must pass; the variable is inlined at build time, and a build on Vercel without an https value fails on purpose (`next.config.ts`).
+The Playwright specs cannot run against `next start`: they read the dev-only `window.__labStore` and `window.__missionStore` hooks, which a production bundle does not expose (`boot.spec.ts` times out waiting for them).
+The production smoke is therefore a short script against `next start -p 3100` and the offline backend: the canvas renders, the Backend chip reads ONLINE, the example instruction is planned through the real backend and the plan reaches the approval step, with no console or page errors.
+
+## What needs the key
+
+No test, local or hosted, makes a paid request; everything a live Meta call would add is covered by `httpx.MockTransport` in `backend/tests/` and by route mocks in the browser specs.
+With `MODEL_API_KEY` set, the same specs still run offline because the e2e backend starts with `MODEL_API_KEY=""`.
+What a key adds is evidence, not coverage: `npm run eval:meta` and one recorded demo produce the first `LIVE_META` execution records (docs/META_USAGE_EVIDENCE.md).
+
