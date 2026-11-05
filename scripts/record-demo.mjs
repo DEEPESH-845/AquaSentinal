@@ -70,8 +70,7 @@ const mark = (name) => { marks.push({ name, t: (Date.now() - t0) / 1000 }); cons
 const wait = (ms) => page.waitForTimeout(ms);
 const cap = async (k, t) => page.evaluate(([k, t]) => window.__cap(k, t), [k, t]);
 const card = async (html) => page.evaluate((h) => window.__card(h), html);
-let mx = 960, my = 540;
-const moveTo = async (x, y, steps = 28) => { await page.mouse.move(x, y, { steps }); mx = x; my = y; };
+const moveTo = (x, y, steps = 28) => page.mouse.move(x, y, { steps });
 const click = async (loc, pause = 350) => {
   await loc.scrollIntoViewIfNeeded();
   const b = await loc.boundingBox();
@@ -81,7 +80,7 @@ const click = async (loc, pause = 350) => {
 };
 const nav = () => page.locator("nav[aria-label='Scenes']");
 const scene = (n) => click(nav().getByRole("button", { name: new RegExp("^0" + n) }));
-const drag = async (x1, y1, x2, y2, steps = 90) => { await moveTo(x1, y1); await page.mouse.down(); await page.mouse.move(x2, y2, { steps }); await page.mouse.up(); mx = x2; my = y2; };
+const drag = async (x1, y1, x2, y2, steps = 90) => { await moveTo(x1, y1); await page.mouse.down(); await page.mouse.move(x2, y2, { steps }); await page.mouse.up(); };
 
 try {
   await page.goto(SITE);
