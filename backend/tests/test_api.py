@@ -207,6 +207,11 @@ def test_cors_allows_listed_origins_and_the_preview_pattern_only(settings):
         assert allowed("https://aquasentinal-git-main-team.vercel.app") == "https://aquasentinal-git-main-team.vercel.app"
         assert allowed("https://evil.example.com") is None
         assert allowed("https://aquasentinal.vercel.app.evil.com") is None
+        # the passcode header is allowed on the preflight, and Retry-After is readable by the page so it can show the wait
+        pre = c.options("/api/system/unlock", headers={"Origin": "https://aquasentinal.vercel.app", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "x-aqua-passcode,content-type"})
+        assert "x-aqua-passcode" in pre.headers["access-control-allow-headers"].lower()
+        real = c.get("/api/health", headers={"Origin": "https://aquasentinal.vercel.app"})
+        assert real.headers.get("access-control-expose-headers") == "Retry-After"
 
 
 def test_oversized_uploads_are_refused_without_reading_them_whole(live_settings):

@@ -145,6 +145,7 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         allow_origin_regex=settings.cors_origin_regex or None,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Retry-After"],  # the browser may show how long the passcode throttle lasts
     )
 
     def S(request: Request) -> Services:
