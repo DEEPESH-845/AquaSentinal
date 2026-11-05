@@ -46,22 +46,22 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 | `GET /api/system/status` | Mode, hardware flags, provider status (LIVE, LIVE_LOCKED or OFFLINE plus fallback), usage and cost estimates, `credits` (`budgetUsd, spentUsd, remainingUsd, liveCalls, cachedCalls, saved: {total, byReason}`), `live` (`lockEnabled, unlocked`), inference queue, gantry snapshot, camera status |
 | `POST /api/system/unlock` | `{passcode}`; returns `{unlocked}`, 429 after 10 failed attempts per minute per client address (rightmost `X-Forwarded-For` entry) or 30 across all clients; a correct passcode is never counted. With `AQUA_LIVE_PASSCODE` set, Meta-calling routes need header `X-Aqua-Passcode`; without it they take the offline path (transcribe and segment return 403 `{error: "live mode locked"}`). See `backend/app/meta/governor.py` |
 | `GET /api/system/config` | Non-secret config: models, limits, geometry, perception thresholds |
-| `POST /api/voice/transcribe` | Multipart `audio` (WAV); returns `{transcript, provider, model, sessionId, audioDurationMs, latencyMs}`; 503 without a key |
-| `POST /api/ai/interpret?offline=` | `{instruction, context?}`; returns `{mission, provider, model}`; Spark failures return the error and tool timeline, never a substitute |
+| `POST /api/voice/transcribe` | Multipart `audio` (WAV), optional `inputSource`, optional `language` (`en` default, or `hi`: sends `languageBias: ["Hindi", "English"]`, otherwise `["English"]`); returns `{transcript, provider, model, sessionId, audioDurationMs, latencyMs}`; 503 without a key |
+| `POST /api/ai/interpret?offline=` | `{instruction, context?, language?}` (`language` is `en` by default, or `hi`: Muse Spark writes its explanation in Hindi, tool arguments stay English enums; the instruction may be Hindi or Hinglish either way, and the mission stores the language); returns `{mission, provider, model}`; Spark failures return the error and tool timeline, never a substitute |
 | `POST /api/ai/segment` | `{captureId, prompt}`; one SAM 3.1 request on a stored frame |
 | `POST /api/missions` | Create from an operator `MissionSpec` |
 | `GET /api/missions`, `GET /api/missions/{id}` | Mission records |
 | `POST /api/missions/{id}/plan` | Re-compile a PLANNED or APPROVED mission, optionally with a new spec |
 | `POST /api/missions/{id}/start` | `{executor: "TWIN" or "BACKEND"}`; BACKEND requires active hardware; refused while the e-stop is latched |
 | `POST /api/missions/{id}/pause`, `/resume`, `/stop` | Status transitions, enforced by `TRANSITIONS`; stop cancels in-flight inference |
-| `POST /api/missions/{id}/complete` | The twin's `MissionResult`; starts the summary task |
+| `POST /api/missions/{id}/complete` | The twin's `MissionResult`; starts the summary task, written in the mission's language |
 | `POST /api/inspection/capture` | Multipart `meta` (JSON `CaptureMeta`), `frame` (JPEG, at most 4 MB), optional `idmask` (PNG); returns `CaptureResult` |
 | `GET /api/inspection/frames/{captureId}?kind=frame or ids` | Stored frame or ID mask |
 | `GET /api/inspection/captures/{missionId}` | Captures with quality, reasoning and segmentations |
 | `POST /api/inspection/observations` | Operator observation at gantry coordinates |
 | `GET /api/inspection/history`, `GET /api/inspection/assets` | Mission history and persistent assets |
 | `GET /api/inspection/{id}/report?format=json or md` | Report built from stored records |
-| `POST /api/inspection/{id}/summary` | Regenerate the summary |
+| `POST /api/inspection/{id}/summary` | Regenerate the summary; optional body `{language}` overrides the mission's language. Offline templates stay English and are never machine-translated |
 | `POST /api/gantry/command` | Command envelope (below) |
 | `GET /api/telemetry` | Gantry snapshot after one watchdog check, camera status |
 | `GET /api/camera/stream` | MJPEG of the latest frame |

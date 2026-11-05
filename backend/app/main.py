@@ -39,10 +39,12 @@ from .schemas import (
     CommandEnvelope,
     InterpretRequest,
     InterpretResponse,
+    Language,
     MissionSpec,
     ObservationCreate,
     SegmentRequest,
     StartRequest,
+    SummaryRequest,
     TranscriptResult,
     TwinMissionResult,
 )
@@ -251,7 +253,9 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
     # ------------------------------------------------------------ voice and AI
 
     @app.post("/api/voice/transcribe", response_model=TranscriptResult)
-    async def transcribe(request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource"), live: bool = Depends(live_access)):
+    async def transcribe(
+        request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource"), language: Language = Form("en"), live: bool = Depends(live_access)
+    ):
         s = S(request)
         if not live:
             raise LiveLocked()
@@ -262,7 +266,7 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         data = await audio.read(MAX_AUDIO_BYTES + 1)
         if not data or len(data) > MAX_AUDIO_BYTES:
             raise HTTPException(413, "audio missing or larger than 10 MB (about five minutes)")
-        body, latency = await s.voice.transcribe(data, ref=f"audio:{input_source} sha1={hashlib.sha1(data).hexdigest()[:10]}")
+        body, latency = await s.voice.transcribe(data, ref=f"audio:{input_source} sha1={hashlib.sha1(data).hexdigest()[:10]}", language=language)
         return TranscriptResult(
             transcript=str(body.get("transcript", "")), provider="MUSE_VOICE_TRANSCRIBE", model=settings.voice_model,
             session_id=str(body.get("sessionId", "")), audio_duration_ms=int(body.get("audioDurationMs") or 0), latency_ms=None if latency is None else round(latency, 1),
@@ -415,8 +419,8 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         return r
 
     @app.post("/api/inspection/{mission_id}/summary")
-    async def regenerate_summary(request: Request, mission_id: str, live: bool = Depends(live_access)):
-        return await S(request).missions.summarize(mission_id, live)
+    async def regenerate_summary(request: Request, mission_id: str, body: SummaryRequest | None = None, live: bool = Depends(live_access)):
+        return await S(request).missions.summarize(mission_id, live, body.language if body else None)
 
     # ------------------------------------------------------------ gantry and telemetry
 

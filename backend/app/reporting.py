@@ -173,6 +173,7 @@ def build_report(repo: Repository, mission_id: str) -> dict[str, Any] | None:
             "spec": m.spec.model_dump(by_alias=True),
             "planSummary": m.plan_summary.model_dump(by_alias=True),
             "executor": m.executor,
+            "language": m.language,
         },
         "outcome": {
             "status": m.status,

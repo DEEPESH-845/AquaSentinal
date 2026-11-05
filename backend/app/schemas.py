@@ -27,6 +27,8 @@ Objective = Literal["pipeline_inspection", "area_survey", "target_search"]
 ScanPattern = Literal["left_to_right", "right_to_left", "serpentine"]
 Priority = Literal["low", "normal", "high"]
 Provider = Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OPERATOR"]
+# The operator's language for Meta-written text and for Voice Transcribe's language bias. Offline templates stay English.
+Language = Literal["en", "hi"]
 MissionStatus = Literal["DRAFT", "PLANNED", "APPROVED", "RUNNING", "PAUSED", "COMPLETED", "ABORTED", "FAILED"]
 PerceptionState = Literal[
     "NORMAL_VISIBILITY", "REDUCED_VISIBILITY", "LOW_CONFIDENCE", "REOBSERVATION_REQUIRED", "INSPECTION_PAUSED", "OPERATOR_INTERVENTION_REQUIRED"
@@ -164,6 +166,8 @@ class MissionRecord(Wire):
     timeline: list[ToolCallRecord] = Field(default_factory=list)
     result: dict[str, Any] | None = None
     executor: Literal["TWIN", "BACKEND"] | None = None
+    # the operator's language when the mission was planned; a later summary is written in it
+    language: Language = "en"
 
 
 # ---------------------------------------------------------------- requests
@@ -185,6 +189,13 @@ class TwinContext(Wire):
 class InterpretRequest(Wire):
     instruction: str = Field(min_length=3, max_length=2000)
     context: TwinContext | None = None
+    language: Language = "en"
+
+
+class SummaryRequest(Wire):
+    """Regenerating a summary. No language means the mission's own."""
+
+    language: Language | None = None
 
 
 class InterpretResponse(Wire):

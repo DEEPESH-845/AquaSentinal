@@ -9,10 +9,13 @@ import io
 import json
 import wave
 
+from ..schemas import Language
 from .client import MetaAPIError, MetaClient
 
 # Vocabulary biasing for the inspection domain (Transcribe Request `keywords`).
 KEYWORDS = ["gantry", "pipeline", "turbidity", "inspection", "carriage", "debris", "object tracking", "segment", "scan", "waypoint", "flange", "valve", "loose cable"]
+# Transcribe Request `languageBias`: Hindi speech is often mixed with English words, so Hindi keeps English as a second bias.
+LANGUAGE_BIAS: dict[Language, list[str]] = {"en": ["English"], "hi": ["Hindi", "English"]}
 MAX_BYTES = 32 * 1024 * 1024
 MAX_SECONDS = 600
 
@@ -41,14 +44,14 @@ class Voice:
         self.client = client
         self.model = model
 
-    async def transcribe(self, wav: bytes, ref: str = "") -> tuple[dict, float | None]:
+    async def transcribe(self, wav: bytes, ref: str = "", language: Language = "en") -> tuple[dict, float | None]:
         seconds = validate_wav(wav)
-        request = {"model": self.model, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK", "keywords": KEYWORDS, "languageBias": ["English"]}
+        request = {"model": self.model, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK", "keywords": KEYWORDS, "languageBias": LANGUAGE_BIAS[language]}
         body, latency = await self.client.multipart(
             "/asr/transcribe",
             self.model,
             {"request": (None, json.dumps(request), "application/json"), "audio": ("command.wav", wav, "audio/wav")},
             op="transcription",
-            input_ref=f"{ref} wav={seconds:.1f}s".strip(),
+            input_ref=f"{ref} wav={seconds:.1f}s lang={language}".strip(),
         )
         return body, latency
