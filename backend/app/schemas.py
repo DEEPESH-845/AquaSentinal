@@ -147,8 +147,8 @@ class ToolCallRecord(Wire):
     ok: bool
     result: Any = None
     error: str | None = None
-    phase: Literal["PLANNING", "EXECUTION", "REPORTING"]
-    by: Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OPERATOR", "SYSTEM"]
+    phase: Literal["PLANNING", "EXECUTION", "REPORTING", "ASK"]
+    by: Literal["MUSE_SPARK", "OFFLINE_RULE_PARSER", "OFFLINE_RECORDS_QUERY", "OPERATOR", "SYSTEM"]
     at: float
 
 
@@ -196,6 +196,13 @@ class SummaryRequest(Wire):
     """Regenerating a summary. No language means the mission's own."""
 
     language: Language | None = None
+
+
+class AskRequest(Wire):
+    """A question about one mission's stored records. The answer is written in `language` when Muse Spark answers it."""
+
+    question: str = Field(min_length=3, max_length=500)
+    language: Language = "en"
 
 
 class InterpretResponse(Wire):
@@ -374,6 +381,40 @@ class TranscriptResult(Wire):
     session_id: str
     audio_duration_ms: int
     latency_ms: float | None  # None when the transcript came from the response cache
+
+
+# ---------------------------------------------------------------- ask the inspector
+
+AskProvider = Literal["MUSE_SPARK", "OFFLINE_RECORDS_QUERY"]
+# Why an offline records query answered instead of Muse Spark. None when Muse Spark answered.
+AskFallback = Literal["LIVE_LOCKED", "NO_KEY", "BUDGET_EXCEEDED", "LIVE_META_FAILED", "NO_ANSWER"]
+
+
+class AskCitation(Wire):
+    """A capture a tool returned and the answer rests on. x, y: gantry cm of the object observed in it (the capture position if nothing was)."""
+
+    capture_id: str
+    x: float
+    y: float
+    label: str
+
+
+class AskResponse(Wire):
+    answer: str
+    citations: list[AskCitation]
+    tool_calls: list[ToolCallRecord]
+    provider: AskProvider
+    model: str | None
+    # every Meta execution this answer cost or replayed, so the log can be checked against it (also when a fallback answered)
+    execution_ids: list[str]
+    # how the Meta calls behind a MUSE_SPARK answer were made: LIVE_META, CACHED_LIVE, MOCKED ... None for an offline answer
+    classification: str | None
+    fallback: AskFallback | None
+    note: str
+    # capture ids the model cited that no tool returned; they are removed from the answer
+    dropped_citations: list[str]
+    # the language the answer is actually written in: offline answers are always English
+    language: Language
 
 
 # ---------------------------------------------------------------- commands over /ws/commands and /api/gantry

@@ -31,7 +31,7 @@ def test_offline_parser_respects_explicit_opt_outs_and_patterns():
 def test_model_only_sees_planning_tools():
     names = {t["function"]["name"] for t in ToolRegistry.schemas("PLANNING")}
     assert names == {"get_telemetry", "get_environment_conditions", "get_camera_status", "create_inspection_mission"}
-    assert len(TOOLS) == 12
+    assert len([t for t in TOOLS.values() if "ASK" not in t.phases]) == 12, "the ASK tools are the only ones added; see test_ask.py"
     for t in ToolRegistry.schemas("PLANNING"):
         assert t["type"] == "function" and t["function"]["parameters"]["type"] == "object"
 

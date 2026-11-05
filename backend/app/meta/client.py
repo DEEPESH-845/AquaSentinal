@@ -14,8 +14,9 @@ import logging
 import random
 import time
 import uuid
-from collections.abc import Awaitable, Callable
-from contextlib import nullcontext
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -115,6 +116,21 @@ def _count_images(payload: dict[str, Any]) -> int:
     return sum(p.get("type") == "input_image" for p in parts)
 
 
+# Execution records emitted by the calls of the task that opened collect_executions(), for a caller that must say which executions made its answer.
+_sink: ContextVar[list[dict[str, Any]] | None] = ContextVar("meta_execution_sink", default=None)
+
+
+@contextmanager
+def collect_executions() -> Iterator[list[dict[str, Any]]]:
+    """Copies of every execution record (live, failed, cached or mocked) the calls made inside the block produce, in order."""
+    records: list[dict[str, Any]] = []
+    token = _sink.set(records)
+    try:
+        yield records
+    finally:
+        _sink.reset(token)
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
@@ -196,6 +212,8 @@ class MetaClient:
         rec.setdefault("costUsd", 0.0)  # what a request cost; only LIVE_META records count toward the budget
         if "classification" not in rec:  # a cache hit arrives classified: it inherits from the execution it replays
             rec["classification"] = "MOCKED" if rec["transport"] == "MOCK_TRANSPORT" else "LIVE_META" if rec["success"] else "LIVE_META_FAILED"
+        if (sink := _sink.get()) is not None:
+            sink.append(dict(rec))
         if self._on_execution:
             try:
                 self._on_execution(rec)
