@@ -330,7 +330,7 @@ function EstopButton() {
   const where = twin && backend ? "the digital twin and the backend motion controller" : twin ? "the digital twin" : "the backend motion controller";
   return twin || backend ? (
     <Btn onClick={clearEstop} className="border-danger! text-danger!" title={`Emergency stop is latched on ${where}. Clear it to allow motion again.`}>
-      <OctagonX size={14} /> Clear e-stop
+      <OctagonX size={14} /> <span className="max-[379px]:sr-only">Clear<span className="max-[1099px]:sr-only"> e-stop</span></span>
     </Btn>
   ) : (
     <Btn danger onClick={emergencyStop} label="Emergency stop" title="Stop all motion now">

@@ -24,6 +24,8 @@ interface Mock {
   passcode: string | null;
   credits: Credits;
   keyed: boolean;
+  /** the backend's e-stop latch. It is global to the backend, so another spec running in the other worker can set it; false unless a test asks */
+  estop: boolean;
   /** failed unlock attempts allowed before 429 */
   attempts: number;
   retryAfter: number;
@@ -34,7 +36,7 @@ interface Mock {
 /** Serve status and unlock from a mock that follows the backend contract; everything else reaches the real backend. */
 async function mockBackend(page: Page, init: Partial<Mock> = {}): Promise<Mock> {
   const base = (await (await page.request.get(`${BACKEND}/api/system/status`)).json()) as SystemStatus;
-  const m: Mock = { seen: [], status: [], urls: [], passcode: PASSCODE, credits: CREDITS, keyed: true, attempts: 10, retryAfter: 60, ...init };
+  const m: Mock = { seen: [], status: [], urls: [], passcode: PASSCODE, credits: CREDITS, keyed: true, estop: false, attempts: 10, retryAfter: 60, ...init };
   page.on("request", (r) => {
     if (r.url().startsWith(BACKEND)) {
       m.urls.push(r.url());
@@ -47,7 +49,7 @@ async function mockBackend(page: Page, init: Partial<Mock> = {}): Promise<Mock> 
     const unlocked = m.passcode === null || sent === m.passcode;
     const status: ProviderStatus["status"] = m.keyed ? (unlocked ? "LIVE" : "LIVE_LOCKED") : "OFFLINE";
     const p = (model: string) => ({ status, model, fallback: status === "LIVE" ? null : "OFFLINE_RULE_PARSER" });
-    const body: SystemStatus = { ...base, providers: { spark: p("muse-spark"), sam: p("sam-3.1"), voice: p("voice") }, credits: m.credits, live: { lockEnabled: m.passcode !== null, unlocked } };
+    const body: SystemStatus = { ...base, providers: { spark: p("muse-spark"), sam: p("sam-3.1"), voice: p("voice") }, credits: m.credits, gantry: { ...base.gantry, estop: m.estop }, live: { lockEnabled: m.passcode !== null, unlocked } };
     const wait = m.delay?.(sent) ?? 0;
     if (wait) await new Promise((r) => setTimeout(r, wait));
     return route.fulfill({ json: body, headers: CORS });
@@ -505,6 +507,8 @@ test.describe("header fit", () => {
     // a long amount and the widest AI chip text are the worst case for width
     locked: { credits: { ...CREDITS, spentUsd: 123.456, budgetUsd: 500, remainingUsd: 376.544 } },
     exhausted: { passcode: null, credits: { ...CREDITS, spentUsd: 1, remainingUsd: 0 } },
+    // "Clear e-stop" replaces "E-stop" and is the widest the last control gets
+    latched: { passcode: null, estop: true },
   } as const;
 
   for (const [name, init] of Object.entries(STATES)) {
