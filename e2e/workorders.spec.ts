@@ -89,6 +89,10 @@ test.describe("Work orders", () => {
     const edge = (i: number) => cards(page).nth(i).evaluate((el) => getComputedStyle(el).borderLeftColor);
     expect(await edge(0)).not.toBe(await edge(1));
     await expect(printButton(page)).toBeEnabled();
+
+    // Hindi needs Meta models, said once for the English list on screen (not once beside the control and again beside the list)
+    await panel(page).getByRole("radio", { name: "हिन्दी" }).click();
+    await expect(panel(page).getByTestId("hindi-needs-meta")).toHaveCount(1);
   });
 
   test("print: the button calls window.print and the print rules leave one clean page per order", async ({ lab, page }) => {

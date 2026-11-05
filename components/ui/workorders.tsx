@@ -11,13 +11,15 @@ import { useMissionStore } from "@/lib/store/mission";
 import { FALLBACK_TAG } from "./ask";
 import { ExecTag } from "./intelligence";
 import { LANGUAGES } from "./mission";
-import { Btn, HindiNeedsMeta, Segmented, SourceTag, f1 } from "./shared";
+import { Btn, HindiNeedsMeta, Segmented, f1 } from "./shared";
 
 const PRIORITY: Record<WorkOrderPriority, { word: string; tone: string; edge: string }> = {
   P1: { word: "Act first", tone: "border-danger/70 text-danger", edge: "border-l-danger" },
   P2: { word: "Plan it", tone: "border-amber/70 text-amber", edge: "border-l-amber" },
   P3: { word: "Routine check", tone: "border-cyan/70 text-cyan", edge: "border-l-cyan" },
 };
+/** "muse-spark-1.3" as the tag reads everywhere else: MUSE SPARK 1.3. The model name comes from the response, never from a constant. */
+const modelTag = (model: string | null | undefined) => (model ?? "muse spark").replace(/-/g, " ").toUpperCase();
 const EFFORT: Record<WorkOrder["effort"], string> = { S: "under an hour", M: "a few hours", L: "a day or more" };
 
 /** A stored frame of this mission, small. A capture the report does not list, or a frame that fails to load, shows its id alone. */
@@ -76,7 +78,7 @@ function Provenance({ r }: { r: WorkOrdersResponse }) {
   if (r.provider === "MUSE_SPARK") {
     return (
       <span className="flex flex-wrap items-center gap-1" data-testid="workorders-badges">
-        <SourceTag source="MUSE_SPARK" />
+        <span className="sim-tag whitespace-nowrap border-teal! text-teal!">{modelTag(r.model)}</span>
         {r.classification && <ExecTag c={r.classification} />}
       </span>
     );
@@ -98,12 +100,13 @@ function Provenance({ r }: { r: WorkOrdersResponse }) {
 
 /** Who will write the next list, before it is asked for. Unknown is grey; a locked backend says locked. */
 function Writer() {
-  const spark = useMissionStore((s) => s.system?.providers.spark.status);
+  const provider = useMissionStore((s) => s.system?.providers.spark);
+  const spark = provider?.status;
   if (!spark) return <span className="sim-tag whitespace-nowrap opacity-70" data-testid="workorders-writer" data-status="UNKNOWN">WRITER UNKNOWN</span>;
   if (spark === "LIVE")
     return (
       <span className="sim-tag whitespace-nowrap border-teal! text-teal!" data-testid="workorders-writer" data-status="LIVE" title="Muse Spark writes the orders from this mission's stored records, as structured output">
-        MUSE SPARK 1.3
+        {modelTag(provider?.model)}
       </span>
     );
   if (spark === "LIVE_LOCKED")
@@ -126,7 +129,7 @@ function Writer() {
  */
 function PrintSheet({ r, report, lang }: { r: WorkOrdersResponse; report: InspectionReport; lang?: string }) {
   if (typeof document === "undefined") return null;
-  const writer = r.provider === "MUSE_SPARK" ? `Muse Spark 1.3 (${(r.classification ?? "unlogged").replace(/_/g, " ").toLowerCase()})` : "offline rules, no model";
+  const writer = r.provider === "MUSE_SPARK" ? `${r.model ?? "Muse Spark"} (${(r.classification ?? "unlogged").replace(/_/g, " ").toLowerCase()})` : "offline rules, no model";
   return createPortal(
     <div className="wo-print" data-testid="workorders-print">
       {r.orders.map((o, i) => (
@@ -207,7 +210,8 @@ export function WorkOrdersCard({ report }: { report: InspectionReport }) {
           <Printer size={14} /> Print work orders
         </Btn>
         <Segmented label="Work order language" options={LANGUAGES} value={language} onChange={setLanguage} />
-        <HindiNeedsMeta offline={spark !== "LIVE"} />
+        {/* one label: it speaks for the list on screen, or for the next one when there is none yet */}
+        <HindiNeedsMeta offline={r ? r.provider !== "MUSE_SPARK" : spark !== "LIVE"} />
       </div>
       <span className="sr-only" role="status">
         {pending ? "Writing the work orders" : r ? `${r.orders.length} work order${r.orders.length === 1 ? "" : "s"} ready` : ""}
@@ -220,7 +224,6 @@ export function WorkOrdersCard({ report }: { report: InspectionReport }) {
               {r.orders.length} order{r.orders.length === 1 ? "" : "s"}
             </span>
             <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
-              <HindiNeedsMeta offline={r.provider !== "MUSE_SPARK"} />
               <Provenance r={r} />
             </span>
           </div>
