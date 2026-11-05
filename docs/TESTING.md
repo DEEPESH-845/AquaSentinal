@@ -139,8 +139,8 @@ Visual specs passed within their 4 percent tolerance, so the baselines were not 
 ## Production build and smoke flow
 
 `NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 npm run build` must pass; the variable is inlined at build time, and a build on Vercel without an https value fails on purpose (`next.config.ts`).
-The smoke flow is `boot.spec.ts` and `mission.spec.ts` against `next start -p 3100` (set the web server command of the throwaway Playwright config to `npx next start -p 3100`), with the backend in the same offline mode as above.
-These two specs plan, approve, run and report a mission through the real backend, so a pass shows the production bundle talks to the API.
+The Playwright specs cannot run against `next start`: they read the dev-only `window.__labStore` and `window.__missionStore` hooks, which a production bundle does not expose (`boot.spec.ts` times out waiting for them).
+The production smoke is therefore a short script against `next start -p 3100` and the offline backend: the canvas renders, the Backend chip reads ONLINE, the example instruction is planned through the real backend and the plan reaches the approval step, with no console or page errors.
 
 ## What needs the key
 
