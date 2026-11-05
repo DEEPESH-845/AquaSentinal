@@ -229,7 +229,8 @@ function Result({ shot, onUnlock }: { shot: Shot; onUnlock: () => void }) {
   }
   const answered = r.provider === "SAM_3_1";
   const why = answered ? null : FALLBACK_TAG[failedWhy(r)];
-  const requests = r.executionIds.length;
+  // executionIds also holds the cache replays (each is an execution record of its own); only requestsSent went to Meta
+  const replayed = Math.max(0, r.executionIds.length - r.requestsSent);
   return (
     <div className="mt-2" data-testid="realcam-result" data-provider={r.provider} data-class={r.classification ?? undefined}>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -245,7 +246,7 @@ function Result({ shot, onUnlock }: { shot: Shot; onUnlock: () => void }) {
         </span>
         <span className="value text-[10px] text-dim" data-testid="realcam-stats">
           {answered ? `latency ${ms(r.latencyMs)} / cost ${usd(r.costUsd, 4)}` : "no mask drawn"}
-          {requests > 0 && ` / ${requests} Meta request${requests === 1 ? "" : "s"} logged`}
+          {` / ${r.requestsSent} sent to Meta${replayed > 0 ? `, ${replayed} replayed from cache` : ""}`}
         </span>
       </div>
       <ul className="mt-1.5 border-t border-line">
@@ -270,7 +271,7 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<string[]>(["cable"]);
   const [custom, setCustom] = useState("");
   const [shot, setShot] = useState<Shot | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [frameError, setFrameError] = useState<string | null>(null);
   const cam = useCamera();
 
   // the phrases of the next shutter: chips first, then the free text, a repeat counted once
@@ -301,7 +302,7 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
 
   const begin = (blob: Blob) => {
     const id = ++seq.current;
-    setUploadError(null);
+    setFrameError(null);
     setShot({ url: URL.createObjectURL(blob), blob, status: "SENDING" });
     void ask(blob, prompts, id);
   };
@@ -309,7 +310,11 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
   const shutter = async () => {
     const v = cam.video.current;
     if (!v || !v.videoWidth) return;
-    begin(await toJpeg(v, v.videoWidth, v.videoHeight));
+    try {
+      begin(await toJpeg(v, v.videoWidth, v.videoHeight));
+    } catch {
+      setFrameError("The camera frame could not be encoded for sending.");
+    }
   };
 
   const again = () => {
@@ -327,7 +332,7 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
       bitmap.close();
       begin(blob);
     } catch {
-      setUploadError("That file is not an image this browser can read.");
+      setFrameError("That file is not an image this browser can read.");
     }
   };
 
@@ -357,8 +362,8 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
   const live = cam.state.status === "live";
   const providerTag =
     sam === "LIVE" ? (
-      <span className="sim-tag whitespace-nowrap border-teal! text-teal!" data-testid="realcam-provider" data-status="LIVE" title="SAM 3.1 segments the frame; each prompt is one request">
-        SAM 3.1
+      <span className="sim-tag whitespace-nowrap border-teal! text-teal!" data-testid="realcam-provider" data-status="LIVE" title="SAM 3.1 will segment the frame; each prompt is one request">
+        SAM 3.1 READY
       </span>
     ) : sam === "LIVE_LOCKED" ? (
       <span className="sim-tag inline-flex items-center gap-1 whitespace-nowrap border-amber/60! text-amber!" data-testid="realcam-provider" data-status="LIVE_LOCKED" title="Live mode is locked: enter the passcode for SAM 3.1">
@@ -405,7 +410,7 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="mt-1 text-[12px] leading-snug text-muted">
-          Point a phone or laptop camera at real water, or upload a photo. SAM 3.1 outlines the things you name. The frame is downscaled to {MAX_SIDE} px before it is sent.
+          Point a phone or laptop camera at real water, or upload a photo. SAM 3.1 outlines the things you name.
         </p>
 
         {/* the frame: live camera, or the still that was sent with the masks drawn over it */}
@@ -442,6 +447,10 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
+        <p className="mt-2 text-[11px] leading-snug text-muted" data-testid="realcam-consent">
+          Shutter, Upload and Segment again send this frame, downscaled to {MAX_SIDE} px, to Meta&apos;s SAM 3.1 through the backend, one request per prompt. Without the Meta key, or while live mode is locked, the
+          backend does not forward it.
+        </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {shot ? (
             <>
@@ -467,9 +476,9 @@ export function RealWaterDialog({ onClose }: { onClose: () => void }) {
           )}
           <input ref={file} type="file" accept="image/*" hidden data-testid="realcam-file" onChange={(e) => void upload(e.target.files?.[0]).finally(() => (e.target.value = ""))} />
         </div>
-        {uploadError && (
+        {frameError && (
           <p className="mt-1 text-[11px] text-danger" role="alert">
-            {uploadError}
+            {frameError}
           </p>
         )}
 

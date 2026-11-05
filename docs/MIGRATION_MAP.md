@@ -53,7 +53,7 @@ Status meanings: copied (unchanged apart from imports), adapted (same module, ex
 | `package.json`, `package-lock.json`, `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `eslint.config.mjs`, `playwright.config.ts`, `.gitignore`, `AGENTS.md` | same | adapted | Package renamed, scripts added, `reference/` ignored by lint |
 | `e2e/*.ts` | `e2e/` | adapted | Fixture and specs kept and updated for the new scenes |
 | `e2e/__screenshots__/*` | (none) | excluded | Baselines regenerated for the new interface |
-| `vercel.json` | same | adapted | Permissions-Policy now allows `microphone=(self)` for push-to-talk; build runs typecheck and lint; the frontend-only deploy still cannot run the backend |
+| `vercel.json` | same | adapted | Permissions-Policy now allows `microphone=(self)` for push-to-talk and `camera=(self)` for the real water camera; build runs typecheck and lint; the frontend-only deploy still cannot run the backend |
 | `docs/HANDOFF.md`, `docs/BLUEPRINT.md`, `README.md`, `CLAUDE.md` | (none) | excluded | Superseded by the documents in this folder |
 | `public/*.svg` | (none) | excluded | Next.js starter assets, unused |
 

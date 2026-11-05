@@ -71,6 +71,7 @@ function liveAnswer(prompts: string[], patch: Partial<RealSegmentResponse> = {})
     provider: "SAM_3_1",
     model: "sam-3.1",
     executionIds: prompts.map((_, i) => `exe_${i}`),
+    requestsSent: prompts.length,
     classification: "LIVE_META",
     latencyMs: 412 + (prompts.length - 1) * 100,
     costUsd: prompts.length * 0.0025,
@@ -81,12 +82,12 @@ function liveAnswer(prompts: string[], patch: Partial<RealSegmentResponse> = {})
 }
 
 /** Answers every shutter with `answer(prompts)` and records what was sent. */
-async function mockSegment(page: Page, answer: (prompts: string[]) => RealSegmentResponse = (p) => liveAnswer(p)) {
+async function mockSegment(page: Page, answer: (prompts: string[], n: number) => RealSegmentResponse = (p) => liveAnswer(p)) {
   const sent: Sent[] = [];
   await page.route(SEGMENT, (route) => {
     const s = parseMultipart(route);
     sent.push(s);
-    return route.fulfill({ json: answer(s.prompts), headers: CORS });
+    return route.fulfill({ json: answer(s.prompts, sent.length - 1), headers: CORS });
   });
   return sent;
 }
@@ -126,11 +127,15 @@ async function photo(page: Page, width: number, height: number): Promise<Buffer>
 test.describe("Real water camera", () => {
   test("the shutter sends one downscaled JPEG and the masks are drawn over the still, with latency, cost and provider", async ({ lab, page }) => {
     await mockProviders(page, "LIVE");
-    const sent = await mockSegment(page);
+    // the first shutter is live; asking again is answered from the backend's response cache, which logs a replay but sends nothing
+    const sent = await mockSegment(page, (p, n) => (n === 0 ? liveAnswer(p) : liveAnswer(p, { classification: "CACHED_LIVE", requestsSent: 0, latencyMs: null, costUsd: 0, segments: liveAnswer(p).segments.map((s) => ({ ...s, latencyMs: null })) })));
     await lab.openOnline();
     await openPanel(page);
     await expect(dialog(page).getByRole("heading", { name: "Real water" })).toBeVisible();
-    await expect(page.getByTestId("realcam-provider")).toHaveText("SAM 3.1");
+    // before the shutter: ready, not provenance, and the operator is told where the frame goes
+    await expect(page.getByTestId("realcam-provider")).toHaveText("SAM 3.1 READY");
+    await expect(page.getByTestId("realcam-consent")).toContainText("to Meta's SAM 3.1 through the backend");
+    await expect(page.getByTestId("realcam-consent")).toContainText("does not forward it");
     await cameraLive(page);
 
     // cable is picked by default; rope makes two prompts, which is the limit
@@ -152,7 +157,8 @@ test.describe("Real water camera", () => {
     await expect(badges.locator("[data-exec=LIVE_META]")).toBeVisible();
     await expect(page.getByTestId("realcam-stats")).toContainText("latency 512 ms");
     await expect(page.getByTestId("realcam-stats")).toContainText("cost $0.0050");
-    await expect(page.getByTestId("realcam-stats")).toContainText("2 Meta requests logged");
+    await expect(page.getByTestId("realcam-stats")).toContainText("2 sent to Meta");
+    await expect(page.getByTestId("realcam-stats")).not.toContainText("replayed");
     const rows = page.getByTestId("realcam-segment");
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText("cable");
@@ -168,6 +174,12 @@ test.describe("Real water camera", () => {
     const [still, svg] = await Promise.all([page.getByTestId("realcam-still").boundingBox(), page.getByTestId("realcam-overlay").boundingBox()]);
     expect(svg!.x).toBeCloseTo(still!.x, 0);
     expect(svg!.width).toBeCloseTo(still!.width, 0);
+
+    // asking again: a cache replay is not a request to Meta, and the panel does not claim one
+    await page.getByTestId("realcam-again").click();
+    await expect(page.getByTestId("realcam-badges").locator("[data-exec=CACHED_LIVE]")).toBeVisible();
+    await expect(page.getByTestId("realcam-stats")).toContainText("latency replayed / cost $0.0000 / 0 sent to Meta, 2 replayed from cache");
+    expect(sent).toHaveLength(2);
 
     // a new shot returns to the live view
     await page.getByTestId("realcam-new").click();
@@ -289,7 +301,7 @@ test.describe("Real water camera", () => {
     await page.route(SEGMENT, (route) => {
       n += 1;
       if (n === 1) return route.fulfill({ status: 422, json: { detail: "send one or two prompts per shutter, got 3" }, headers: CORS });
-      const refused = liveAnswer(["cable"], { provider: "UNAVAILABLE", classification: null, latencyMs: null, costUsd: 0, executionIds: [], note: "Meta credit budget of $1.00 would be exceeded" });
+      const refused = liveAnswer(["cable"], { provider: "UNAVAILABLE", classification: null, latencyMs: null, costUsd: 0, executionIds: [], requestsSent: 0, note: "Meta credit budget of $1.00 would be exceeded" });
       refused.segments[0] = { prompt: "cable", status: "SKIPPED_BUDGET", latencyMs: null, error: "Meta credit budget of $1.00 would be exceeded", instances: [] };
       return route.fulfill({ json: refused, headers: CORS });
     });
@@ -322,6 +334,22 @@ test.describe("Real water camera", () => {
     await page.getByTestId("realcam-file").setInputFiles({ name: "pond.jpg", mimeType: "image/jpeg", buffer: await photo(page, 800, 600) });
     await expect(page.getByTestId("realcam-mask")).toHaveCount(1);
     expect(sent).toHaveLength(1);
+  });
+
+  test("a frame the browser cannot encode is reported and nothing is sent", async ({ lab, page }) => {
+    await mockProviders(page, "LIVE");
+    const sent = await mockSegment(page);
+    await lab.openOnline();
+    await openPanel(page);
+    await cameraLive(page);
+    await page.evaluate(() => {
+      HTMLCanvasElement.prototype.toBlob = (cb) => cb(null);
+    });
+    await shutter(page).click();
+    await expect(dialog(page).getByRole("alert")).toContainText("could not be encoded");
+    await expect(page.getByTestId("realcam-still")).toHaveCount(0);
+    await expect(shutter(page)).toBeEnabled();
+    expect(sent).toHaveLength(0);
   });
 
   test("no camera API (an insecure origin has none): said so, upload offered", async ({ lab, page }) => {

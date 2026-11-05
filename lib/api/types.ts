@@ -191,7 +191,10 @@ export interface RealSegmentResponse {
   /** SAM_3_1 when the model answered at least one phrase; UNAVAILABLE when there is no key, no passcode, or every request failed */
   provider: "SAM_3_1" | "UNAVAILABLE";
   model: string | null;
+  /** every execution record of this shutter, cache replays included */
   executionIds: string[];
+  /** how many of them were requests that went to Meta (live or failed); the rest were replayed from the cache */
+  requestsSent: number;
   /** how the Meta calls behind the masks were made; null when none succeeded */
   classification: ModelExecution["classification"] | null;
   /** the slowest phrase (they run side by side); null when every answer was replayed or none was asked */
