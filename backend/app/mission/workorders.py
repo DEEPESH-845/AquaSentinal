@@ -21,7 +21,7 @@ from ..db import Repository
 from ..meta.client import MetaAPIError, MetaBudgetExceeded, collect_executions
 from ..meta.spark import Spark, _json_content, with_language
 from ..reporting import build_report
-from ..schemas import AskFallback, Language, WorkOrder, WorkOrdersResponse
+from ..schemas import TRAVEL_X, TRAVEL_Y, AskFallback, Language, WorkOrder, WorkOrdersResponse
 from .ask import NoAnswer, _classify
 from .service import MissionError
 
@@ -86,10 +86,11 @@ def _human(label: str) -> str:
 
 
 def track_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
-    """The tracked objects the orders rest on, anomaly candidates first (as in the report). Also the records the model is shown."""
+    """The tracked objects the orders rest on, anomaly candidates first (as in the report). Also the records the model is shown.
+    Positions are clamped into the gantry travel: detector estimates can lie a little outside it, an order's location cannot."""
     return [
         {
-            "trackId": a["assetId"], "label": a["label"], "x": a["x"], "y": a["y"], "observations": a["observations"], "status": a["status"],
+            "trackId": a["assetId"], "label": a["label"], "x": min(max(a["x"], 0.0), TRAVEL_X), "y": min(max(a["y"], 0.0), TRAVEL_Y), "observations": a["observations"], "status": a["status"],
             "sources": a["sources"], "bestConfidence": a["bestConfidence"], "confidenceSource": a["confidenceSource"], "captureIds": a["captureIds"][:MAX_CAPTURES_PER_TRACK],
         }
         for a in report["assets"][:MAX_TRACKS]
@@ -173,17 +174,21 @@ class WorkOrderService:
             "missionId": mission_id, "instruction": report["mission"]["instruction"], "trackedObjects": tracks,
             "uninspectedStrips": len(report["uninspectedAreas"]), "disclaimer": report["disclaimers"][0],
         }
-        body, _ = await self.spark.client.chat(
-            {
-                "model": self.spark.model,
-                "messages": [{"role": "system", "content": with_language(WORKORDERS_SYSTEM, language)}, {"role": "user", "content": json.dumps(records, default=str)}],
-                "response_format": {"type": "json_schema", "json_schema": {"name": "WorkOrders", "schema": ORDERS_SCHEMA}},
-                "max_tokens": WORKORDERS_MAX_TOKENS,
-            },
-            op="work_orders", input_ref=f"workorders:mission={mission_id} lang={language}",
-        )
+        try:
+            body, _ = await self.spark.client.chat(
+                {
+                    "model": self.spark.model,
+                    "messages": [{"role": "system", "content": with_language(WORKORDERS_SYSTEM, language)}, {"role": "user", "content": json.dumps(records, default=str)}],
+                    "response_format": {"type": "json_schema", "json_schema": {"name": "WorkOrders", "schema": ORDERS_SCHEMA}},
+                    "max_tokens": WORKORDERS_MAX_TOKENS,
+                },
+                op="work_orders", input_ref=f"workorders:mission={mission_id} lang={language}",
+            )
+            raw = _json_content(body).get("orders")
+        except (TypeError, AttributeError, KeyError, IndexError) as e:  # an envelope of the wrong shape: choices, message or content
+            raise NoAnswer(f"the reply was malformed ({type(e).__name__})") from e
         valid = {c for t in tracks for c in t["captureIds"]}
-        orders, unknown, dropped = validate_orders(_json_content(body).get("orders"), valid)
+        orders, unknown, dropped = validate_orders(raw, valid)
         if not orders:
             raise NoAnswer(f"none of its {dropped} order(s) survived the checks" if dropped else "it wrote no orders")
         return WorkOrdersResponse(

@@ -12,8 +12,8 @@ from pydantic import ValidationError
 from app.main import create_app
 from app.meta.spark import HINDI_INSTRUCTION
 from app.mission.ask import NoAnswer
-from app.mission.workorders import MAX_ORDERS, NOTHING_TO_ORDER, WORKORDERS_SYSTEM, offline_orders, validate_orders
-from app.schemas import WorkOrder
+from app.mission.workorders import MAX_ORDERS, NOTHING_TO_ORDER, WORKORDERS_SYSTEM, offline_orders, track_rows, validate_orders
+from app.schemas import TRAVEL_X, TRAVEL_Y, WorkOrder
 
 from .conftest import chat_json
 from .test_ask import CABLE_DET, seed, seeded
@@ -201,6 +201,44 @@ def test_a_reply_with_no_surviving_order_falls_back_to_the_rules_and_keeps_the_e
         assert r["provider"] == "OFFLINE_RULES" and r["fallback"] == fallback and why in r["note"] and r["classification"] is None
         assert [o["title"] for o in r["orders"]] == ["Secure and re-route the loose cable", "Remove the foreign object"], "the fallback still writes the orders"
         assert len(r["executionIds"]) == 1, "the call that was made stays on the record"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"choices": {"first": 1}},  # choices is not a list
+        {"choices": ["text"]},  # a choice is not an object
+        {"choices": [{"message": "text"}]},  # message is not an object
+        {"choices": [{"message": {"content": {"orders": []}}}]},  # content is not a string
+    ],
+    ids=["choices-dict", "choice-str", "message-str", "content-dict"],
+)
+def test_an_envelope_of_the_wrong_shape_falls_back_with_a_label_not_a_500(settings, live_settings, meta, reply):
+    seeded(settings)
+    with TestClient(create_app(live_settings, meta_transport=meta.transport)) as c:
+        mid = c.get("/api/missions").json()[0]["id"]
+        meta.add("/chat/completions", httpx.Response(200, json={**reply, "usage": {}}))
+        r = orders(c, mid)
+        assert r["provider"] == "OFFLINE_RULES" and r["fallback"] == "NO_ANSWER" and "malformed" in r["note"] and len(r["orders"]) == 2
+
+
+def test_a_track_outside_the_gantry_travel_is_clamped_so_both_paths_stay_in_range(settings, live_settings, meta):
+    far = [{"objectId": "cable-1", "trueType": "LOOSE_CABLE", "class": "LOOSE_CABLE", "confidence": 0.5, "bbox": [0.15, 0.4, 0.25, 0.12], "estX": TRAVEL_X + 0.4, "estY": -0.3}]
+    with TestClient(create_app(settings)) as c:
+        mid = seed(c, frames=((FRAME_C, far),))
+        report = c.get(f"/api/inspection/{mid}/report").json()
+        (asset,) = report["assets"]
+        assert asset["x"] > TRAVEL_X and asset["y"] < 0, "the stored estimate really is outside the travel"
+        (cable,) = orders(c, mid)["orders"]  # was a 500: the order's location is bounded by the travel
+        assert cable["location"] == {"x": TRAVEL_X, "y": 0.0}
+        (clamped,) = track_rows(report)
+        assert (clamped["x"], clamped["y"]) == (TRAVEL_X, 0.0)
+    with TestClient(create_app(live_settings, meta_transport=meta.transport)) as c:
+        meta.add("/chat/completions", chat_json({"orders": [row("P1", [asset["captureIds"][0]], title="Re-route cable", location={"x": TRAVEL_X, "y": 0.0})]}))
+        r = orders(c, mid)
+        assert r["provider"] == "MUSE_SPARK" and r["orders"][0]["location"] == {"x": TRAVEL_X, "y": 0.0} and r["droppedOrders"] == 0
+        sent = json.loads(meta.bodies("/chat/completions")[0]["messages"][1]["content"])
+        assert (sent["trackedObjects"][0]["x"], sent["trackedObjects"][0]["y"]) == (TRAVEL_X, 0.0), "the model is shown in-range positions only"
 
 
 def test_a_failed_meta_call_falls_back_and_says_so(settings, live_settings, meta):
