@@ -60,3 +60,4 @@ data/
 # read-only HydraLoom reference clone
 /reference/
 /e2e/.backend-data/
+demo-out/
