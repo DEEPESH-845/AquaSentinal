@@ -31,10 +31,13 @@ from .meta.governor import Governor, LiveLocked, client_ip, live_access
 from .meta.sam import Sam
 from .meta.spark import Spark
 from .meta.voice import Voice
+from .mission.ask import AskService
 from .mission.service import MissionError, MissionService
 from .perception.pipeline import PerceptionPipeline
 from .reporting import build_report, to_markdown
 from .schemas import (
+    AskRequest,
+    AskResponse,
     CaptureMeta,
     CommandEnvelope,
     InterpretRequest,
@@ -74,6 +77,7 @@ class Services:
     motion: MotionController
     camera: CameraManager
     missions: MissionService
+    asker: AskService
     sim_driver: SimulatedGantryDriver | None
     started_at: float
 
@@ -103,7 +107,7 @@ def build_services(settings: Settings, meta_transport=None, serial_factory=None)
         return motion.snapshot()
 
     missions = MissionService(repo, events, spark, pipeline, hw_status)
-    return Services(settings, repo, events, governor, meta, spark, sam, voice, pipeline, motion, camera, missions, sim_driver, time.time())
+    return Services(settings, repo, events, governor, meta, spark, sam, voice, pipeline, motion, camera, missions, AskService(repo, spark), sim_driver, time.time())
 
 
 def create_app(settings: Settings | None = None, *, meta_transport=None, serial_factory=None) -> FastAPI:
@@ -421,6 +425,11 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
     @app.post("/api/inspection/{mission_id}/summary")
     async def regenerate_summary(request: Request, mission_id: str, body: SummaryRequest | None = None, live: bool = Depends(live_access)):
         return await S(request).missions.summarize(mission_id, live, body.language if body else None)
+
+    @app.post("/api/inspection/{mission_id}/ask", response_model=AskResponse)
+    async def ask(request: Request, mission_id: str, body: AskRequest, live: bool = Depends(live_access)):
+        """Grounded Q&A over one mission's stored records: Muse Spark through read-only tools, else the labelled offline records query."""
+        return await S(request).asker.ask(mission_id, body.question, body.language, live)
 
     # ------------------------------------------------------------ gantry and telemetry
 
