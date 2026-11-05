@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const plexMono = IBM_Plex_Mono({ variable: "--font-plex-mono", subsets: ["latin"], weight: ["400", "500", "600"] });
 // Hindi text from Meta models. Neither font above has Devanagari glyphs; preload is off so English pages do not download it up front.
-const devanagari = Noto_Sans_Devanagari({ variable: "--font-devanagari", subsets: ["devanagari"], weight: ["400", "500", "600"], preload: false });
+const devanagari = Noto_Sans_Devanagari({ variable: "--font-devanagari", subsets: ["devanagari"], preload: false }); // the variable font covers every weight; a weight list breaks the production build (Turbopack: "queries have exactly one entry")
 
 export const metadata: Metadata = {
   title: "AquaSentinal - AI Underwater Inspection",
