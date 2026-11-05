@@ -129,7 +129,7 @@ def validate_orders(raw: Any, valid_evidence: set[str]) -> tuple[list[WorkOrder]
             continue
         bad = [c for c in order.evidence if c not in valid_evidence]
         if bad or not order.evidence:
-            unknown += [c for c in bad if c not in unknown]
+            unknown += [c for c in dict.fromkeys(bad) if c not in unknown]
             dropped += 1
         elif len(kept) < MAX_ORDERS:
             kept.append(order)
