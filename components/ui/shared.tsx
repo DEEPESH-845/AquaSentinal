@@ -75,12 +75,12 @@ export function Dot({ tone, pulse }: { tone: keyof typeof DOT_BG; pulse?: boolea
 /** Object list reference is stable across publishes; positions are read with primitive selectors elsewhere. */
 export const useObjects = () => useSimStore((s) => s.scenario.objects);
 
-export function CardHead({ title, note, right }: { title: string; note?: string; right?: ReactNode }) {
+export function CardHead({ title, note, noteLang, right }: { title: string; note?: string; noteLang?: string; right?: ReactNode }) {
   return (
     <div className="mb-3 flex items-start justify-between gap-3">
       <div>
         <h2 className="font-sans text-xl leading-tight text-text">{title}</h2>
-        {note && <p className="mt-1 text-[12px] leading-snug text-muted">{note}</p>}
+        {note && <p lang={noteLang} className="mt-1 text-[12px] leading-snug text-muted">{note}</p>}
       </div>
       {right}
     </div>
@@ -223,13 +223,40 @@ export function Segmented<T extends string>({
   const root = useRef<HTMLDivElement>(null);
   const ind = useRef<HTMLSpanElement>(null);
   const first = useRef(true);
+  // The indicator's box. It is tweened as a plain object and written to the style by hand: GSAP's CSS plugin rounds px values to whole pixels.
+  const at = useRef({ x: 0, width: 0 });
   useLayoutEffect(() => {
-    const btn = root.current?.querySelector<HTMLElement>(`[data-seg="${value}"]`);
-    if (!btn || !ind.current) return;
-    const to = { x: btn.offsetLeft, width: btn.offsetWidth };
-    if (first.current || prefersReducedMotion()) gsap.set(ind.current, to);
-    else gsap.to(ind.current, { ...to, duration: DUR.base, ease: EASE.out, overwrite: true });
+    const box = root.current;
+    const el = ind.current;
+    const btn = box?.querySelector<HTMLElement>(`[data-seg="${value}"]`);
+    if (!box || !el || !btn) return;
+    const pos = at.current;
+    const draw = () => {
+      el.style.transform = `translateX(${pos.x}px)`;
+      el.style.width = `${pos.width}px`;
+    };
+    // the option's box relative to the root's padding edge, with its fractional width (offsetLeft and offsetWidth round)
+    const measure = () => {
+      const b = btn.getBoundingClientRect();
+      return { x: b.left - box.getBoundingClientRect().left - box.clientLeft, width: b.width };
+    };
+    if (first.current || prefersReducedMotion()) {
+      Object.assign(pos, measure());
+      draw();
+    } else gsap.to(pos, { ...measure(), duration: DUR.base, ease: EASE.out, overwrite: true, onUpdate: draw });
     first.current = false;
+    // a web font that arrives after the first paint (the Devanagari one) changes the options' widths: follow the selected option
+    let width = box.getBoundingClientRect().width; // the observer also reports once on observe(); that one changes nothing and must not cut the glide short
+    const ro = new ResizeObserver(() => {
+      const now = box.getBoundingClientRect().width;
+      if (now === width) return;
+      width = now;
+      gsap.killTweensOf(pos);
+      Object.assign(pos, measure());
+      draw();
+    });
+    ro.observe(box);
+    return () => ro.disconnect();
   }, [value, options.length]);
   const move = (d: number) => {
     const i = options.findIndex((o) => o.id === value);

@@ -45,8 +45,8 @@ async function realMission(page: Page, language: "en" | "hi", instruction = "ins
 }
 
 /** The backend's report for a mission that has been planned, started and completed, with the template summary the offline path writes. */
-async function finishedReport(page: Page, language: "en" | "hi") {
-  const m = await realMission(page, language);
+async function finishedReport(page: Page, language: "en" | "hi", instruction?: string) {
+  const m = await realMission(page, language, instruction);
   await page.request.post(`${BACKEND}/api/missions/${m.id}/start`, { data: { executor: "TWIN" } });
   await page.request.post(`${BACKEND}/api/missions/${m.id}/complete`, { data: { ...RESULT, missionId: m.id } });
   await expect
@@ -83,6 +83,25 @@ test.describe("operator language", () => {
     await expect(english(page)).toHaveAttribute("aria-checked", "true");
     await expect(english(page)).toBeFocused();
     expect(await saved(page)).toBe("en");
+  });
+
+  test("after a reload with Hindi saved, the indicator sits under the selected option once the Devanagari font has loaded", async ({ lab, page }) => {
+    await lab.openOnline();
+    await lab.scene(5);
+    await hindi(page).click();
+    await page.reload();
+    await lab.open();
+    await lab.scene(5);
+    await expect(hindi(page)).toHaveAttribute("aria-checked", "true");
+    // the font arrives after the first paint (it is not preloaded) and widens the option: wait for it, then compare boxes
+    await page.evaluate(() => document.fonts.load("500 10px 'Noto Sans Devanagari'", "हिन्दी").then(() => document.fonts.ready));
+    const gap = () =>
+      control(page).evaluate((root) => {
+        const sel = root.querySelector<HTMLElement>("[aria-checked=true]")!.getBoundingClientRect();
+        const ind = root.querySelector<HTMLElement>("[aria-hidden]")!.getBoundingClientRect();
+        return { left: Math.abs(ind.left - sel.left), width: Math.abs(ind.width - sel.width) };
+      });
+    await expect.poll(gap, { message: "the indicator follows the selected option's box" }).toEqual({ left: expect.closeTo(0, 1), width: expect.closeTo(0, 1) });
   });
 
   test("a saved value that is not a language is ignored", async ({ lab, page }) => {
@@ -207,14 +226,16 @@ test.describe("operator language", () => {
     await lab.waitMission((s) => s.report?.mission.language === "hi");
     await lab.scene(7);
     const card = lab.card();
+    // scene 07 also holds the Work orders and Ask panels, which carry their own label while Meta is unavailable; this test is about the summary
+    const labels = card.getByTestId("report-summary").getByTestId("hindi-needs-meta");
     await expect(card.getByText("TEMPLATE FROM RECORDS")).toBeVisible();
-    await expect(labels(page)).toHaveCount(0); // English is selected
+    await expect(labels).toHaveCount(0); // English is selected
 
     await lab.scene(5);
     await hindi(page).click();
     await lab.scene(7);
     await expect(card.getByText("TEMPLATE FROM RECORDS")).toBeVisible();
-    await expect(labels(page)).toHaveCount(1);
+    await expect(labels).toHaveCount(1);
 
     // the same report as Muse Spark would write it: Hindi text, marked as Hindi, no label
     await page.route(`**/api/inspection/${m.id}/report`, async (route) => {
@@ -225,7 +246,22 @@ test.describe("operator language", () => {
     await page.evaluate((id) => window.__missionStore!.getState().loadReport(id), m.id);
     await expect(card.getByText("सारांश: एक ढीली केबल मिली।")).toHaveAttribute("lang", "hi");
     await expect(card.getByText("केवल एक कैप्चर")).toBeVisible();
-    await expect(labels(page)).toHaveCount(0);
+    await expect(labels).toHaveCount(0);
+  });
+
+  test("the report's instruction note is marked lang=hi when it is written in Devanagari, and not when it is Latin script", async ({ lab, page }) => {
+    const hindiText = "पाइपलाइन को बाएँ से दाएँ स्कैन करो, ढीली केबल और बाहरी वस्तुएँ खोजो";
+    const note = (text: string) => lab.card().getByText(text, { exact: true });
+    const devanagari = await finishedReport(page, "hi", hindiText);
+    const latin = await finishedReport(page, "hi", "pipeline ko baen se daen scan karo, dheeli cable aur baahri cheezein khojo");
+    await lab.openOnline();
+    for (const [id, text, lang] of [[devanagari.id, hindiText, "hi"], [latin.id, latin.instruction, null]] as const) {
+      await page.evaluate((id) => window.__missionStore!.getState().loadReport(id), id);
+      await lab.waitMission((s, id) => s.report?.mission.id === id, id);
+      await lab.scene(7);
+      if (lang) await expect(note(text)).toHaveAttribute("lang", lang);
+      else await expect(note(text)).not.toHaveAttribute("lang", /./);
+    }
   });
 
   for (const [w, h] of [

@@ -199,6 +199,7 @@ export function ReportCard() {
       <CardHead
         title="Inspection report"
         note={r.mission.instruction}
+        noteLang={/\p{Script=Devanagari}/u.test(r.mission.instruction) ? "hi" : undefined} // spoken or typed Hindi; Hinglish in Latin letters is not marked
         right={
           <div className="flex shrink-0 gap-1.5">
             <Btn
@@ -222,7 +223,7 @@ export function ReportCard() {
       />
       <Metrics r={r} />
       <div className="mt-3 grid grid-cols-[minmax(0,1fr)_300px] gap-4 max-[999px]:grid-cols-1">
-        <div className="min-w-0">
+        <div className="min-w-0" data-testid="report-summary">
           <div className="mb-1 flex items-center justify-between gap-2">
             <span className="label text-dim">Summary</span>
             <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
