@@ -27,6 +27,8 @@ interface Mock {
   /** failed unlock attempts allowed before 429 */
   attempts: number;
   retryAfter: number;
+  /** how long to hold a status answer, by the passcode that request carried (to put reads out of order) */
+  delay?: (sent: string | null) => number;
 }
 
 /** Serve status and unlock from a mock that follows the backend contract; everything else reaches the real backend. */
@@ -39,13 +41,15 @@ async function mockBackend(page: Page, init: Partial<Mock> = {}): Promise<Mock> 
       m.seen.push(r.headers()["x-aqua-passcode"] ?? null);
     }
   });
-  await page.route("**/api/system/status", (route: Route) => {
+  await page.route("**/api/system/status", async (route: Route) => {
     const sent = route.request().headers()["x-aqua-passcode"] ?? null;
     m.status.push(sent);
     const unlocked = m.passcode === null || sent === m.passcode;
     const status: ProviderStatus["status"] = m.keyed ? (unlocked ? "LIVE" : "LIVE_LOCKED") : "OFFLINE";
     const p = (model: string) => ({ status, model, fallback: status === "LIVE" ? null : "OFFLINE_RULE_PARSER" });
     const body: SystemStatus = { ...base, providers: { spark: p("muse-spark"), sam: p("sam-3.1"), voice: p("voice") }, credits: m.credits, live: { lockEnabled: m.passcode !== null, unlocked } };
+    const wait = m.delay?.(sent) ?? 0;
+    if (wait) await new Promise((r) => setTimeout(r, wait));
     return route.fulfill({ json: body, headers: CORS });
   });
   await page.route("**/api/system/unlock", (route: Route) => {
@@ -69,6 +73,7 @@ test.describe("credit meter", () => {
     await lab.openOnline();
     await expect(chip(page)).toHaveAttribute("data-state", "NO_KEY");
     await expect(page.getByTestId("credits-value")).toHaveText("NO KEY");
+    await expect(chip(page)).toHaveAttribute("aria-label", /^Credits no key\./);
     await expect(ai(page)).toContainText("OFFLINE");
     expect(await ai(page).evaluate((el) => el.tagName)).toBe("SPAN"); // not a lock button: nothing to unlock
 
@@ -84,17 +89,20 @@ test.describe("credit meter", () => {
     await expect(chip(page)).toHaveAttribute("aria-expanded", "true");
   });
 
-  test("within budget: the chip reads CREDITS $0.042 / $1.00 with a 4 percent bar, teal", async ({ lab, page }) => {
+  test("within budget: the chip reads CREDITS $0.042 / $1.00 with a 4.2 percent bar, teal", async ({ lab, page }) => {
     await mockBackend(page, { passcode: null });
     await lab.openOnline();
     await expect(chip(page)).toHaveAttribute("data-state", "OK");
     await expect(chip(page)).toContainText(/credits/i);
     await expect(page.getByTestId("credits-value")).toHaveText("$0.042 / $1.00");
-    const w = await chip(page).evaluate((el) => {
-      const bar = el.querySelector<HTMLElement>("span[aria-hidden] > span")!;
-      return bar.getBoundingClientRect().width / bar.parentElement!.getBoundingClientRect().width;
-    });
-    expect(w).toBeCloseTo(0.042, 2);
+    await expect(chip(page)).toHaveAttribute("aria-label", /^Credits within budget\./);
+    // the bar is 4.2 percent wide, not 4 and not 5: the exact style value, and the laid-out ratio to three places
+    const bar = chip(page).locator("span[aria-hidden] > span");
+    await expect(bar).toHaveAttribute("style", /^width:\s*4\.2%;?$/);
+    await expect(async () => {
+      const w = await bar.evaluate((el) => el.getBoundingClientRect().width / el.parentElement!.getBoundingClientRect().width);
+      expect(w).toBeCloseTo(0.042, 3);
+    }).toPass();
     await expect(ai(page)).toContainText("META LIVE");
     expect(await ai(page).evaluate((el) => el.tagName)).toBe("SPAN"); // no lock configured, so no lock control
   });
@@ -132,6 +140,8 @@ test.describe("credit meter", () => {
     await expect(chip(page)).toHaveAttribute("data-state", "WARN");
     await expect(page.getByTestId("credits-value")).toHaveText("$0.850 / $1.00");
     await expect(page.getByTestId("credits-value")).toHaveCSS("color", "rgb(242, 180, 93)");
+    await expect(chip(page).locator("span[aria-hidden] > span")).toHaveAttribute("style", /^width:\s*85%;?$/);
+    await expect(chip(page)).toHaveAttribute("aria-label", /^Credits warning, over 80 percent\./);
 
     // exactly 80 percent is not above it
     m.credits = { ...CREDITS, spentUsd: 0.8, remainingUsd: 0.2 };
@@ -141,10 +151,31 @@ test.describe("credit meter", () => {
     m.credits = { ...CREDITS, spentUsd: 1.0004, remainingUsd: 0 };
     await refresh(page);
     await expect(chip(page)).toHaveAttribute("data-state", "EXHAUSTED");
+    await expect(chip(page)).toHaveAttribute("aria-label", /^Credits cap reached\./);
     await expect(page.getByTestId("credits-value")).toHaveCSS("color", "rgb(241, 111, 112)");
     await chip(page).click();
     await expect(page.getByTestId("credits-state")).toHaveText("CAP REACHED");
     await expect(page.getByTestId("credits-popover")).toContainText("Budget cap reached");
+  });
+
+  test("the full CREDITS $0.042 / $1.00 text shows from 1280 px up and collapses to icon and amount below", async ({ lab, page }) => {
+    await mockBackend(page, { passcode: null });
+    await lab.openOnline();
+    const label = chip(page).locator("span.label", { hasText: /^credits$/i });
+    const budget = page.getByTestId("credits-value").locator("span");
+    // the demo laptops: 1280, 1366, 1440, 1512, 1536, plus the wide displays
+    for (const w of [1280, 1366, 1440, 1512, 1536, 1600, 1920, 2560]) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await expect(label, `${w}px label`).toBeVisible();
+      await expect(budget, `${w}px budget`).toBeVisible();
+      await expect(page.getByTestId("credits-value")).toHaveText("$0.042 / $1.00");
+      expect(await headerProblems(page), `${w}px header`).toEqual([]);
+    }
+    await page.setViewportSize({ width: 1279, height: 900 });
+    await expect(label).toBeHidden();
+    await expect(budget).toBeHidden();
+    await expect(page.getByTestId("credits-value")).toBeVisible(); // the amount stays
+    expect(await headerProblems(page)).toEqual([]);
   });
 
   test("a spend below a tenth of a cent is not shown as zero", async ({ lab, page }) => {
@@ -159,6 +190,7 @@ test.describe("credit meter", () => {
     await lab.open();
     await expect(chip(page)).toHaveAttribute("data-state", "UNKNOWN");
     await expect(page.getByTestId("credits-value")).toHaveText("UNKNOWN");
+    await expect(chip(page)).toHaveAttribute("aria-label", /^Credits unknown\./);
   });
 });
 
@@ -248,6 +280,8 @@ test.describe("live unlock", () => {
     // the countdown ends and the form is usable again
     await expect(wait).toBeHidden({ timeout: 8000 });
     await expect(dlg.getByRole("button", { name: "Unlock", exact: true })).toBeEnabled();
+    // the refusal is over, so its message goes with it
+    await expect(page.getByTestId("unlock-error")).toHaveText("");
   });
 
   test("a stored passcode the backend rejects is forgotten at once and not sent again", async ({ lab, page }) => {
@@ -361,6 +395,73 @@ test.describe("live unlock", () => {
     await expect(page.getByTestId("credits-lock-row")).toBeHidden();
   });
 
+  test("the lock row is in the popover wherever the AI chip is not drawn, so a locked or unlocked tab can always change state", async ({ lab, page }) => {
+    const m = await mockBackend(page);
+    await page.addInitScript((p) => sessionStorage.setItem("aqua.passcode", p), PASSCODE);
+    await lab.openOnline();
+    await expect(chip(page)).toHaveAttribute("data-state", "OK");
+    const row = page.getByTestId("credits-lock-row");
+    // unlocked: the header's secondary chips are drawn from 999 px up (they are hidden when narrower), so the popover offers the way back to locked below that
+    for (const [w, drawn] of [[320, false], [599, false], [800, false], [998, false], [999, true], [1440, true]] as const) {
+      await page.setViewportSize({ width: w, height: 900 });
+      if (drawn) await expect(ai(page), `${w}px AI chip`).toBeVisible();
+      else await expect(ai(page), `${w}px AI chip`).toBeHidden();
+      await chip(page).click();
+      if (drawn) await expect(row, `${w}px row`).toBeHidden();
+      else await expect(row, `${w}px row`).toBeVisible();
+      await page.keyboard.press("Escape");
+    }
+    // and it works at 800 px: Lock opens the dialog, Lock live mode forgets the passcode
+    await page.setViewportSize({ width: 800, height: 900 });
+    await chip(page).click();
+    await expect(row).toContainText("Live mode is unlocked");
+    await row.getByRole("button", { name: "Lock", exact: true }).click();
+    const dlg = page.getByTestId("unlock-dialog");
+    await expect(dlg).toContainText("Live mode is unlocked");
+    await dlg.getByRole("button", { name: "Lock live mode" }).click();
+    await expect(dlg).toBeHidden();
+    expect(await stored(page)).toBeNull();
+    await expect(chip(page).locator("svg.lucide-lock")).toBeHidden(); // below 600 only; at 800 the lock chip is the AI chip
+    await expect(ai(page)).toContainText("LIVE LOCKED");
+    const before = m.seen.length;
+    await refresh(page);
+    expect(m.seen.slice(before).filter((h) => h !== null)).toEqual([]);
+    // locked at 800 px: the AI chip (icon only) is drawn, so no row
+    await chip(page).click();
+    await expect(row).toBeHidden();
+  });
+
+  test("a status read that began before an unlock cannot overwrite the unlocked state when it lands last", async ({ lab, page }) => {
+    const m = await mockBackend(page);
+    await lab.openOnline();
+    await expect(ai(page)).toContainText("LIVE LOCKED");
+    // a read without the passcode is held for 2.5 s; every read that carries one is instant
+    m.delay = (sent) => (sent === null ? 2500 : 0);
+    const slow = page.waitForResponse((r) => r.url().endsWith("/api/system/status") && r.request().headers()["x-aqua-passcode"] === undefined);
+    await page.evaluate(() => void window.__missionStore!.getState().refreshStatus());
+    await ai(page).click();
+    await page.getByTestId("unlock-dialog").getByRole("textbox", { name: "Passcode" }).fill(PASSCODE);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("unlock-dialog")).toBeHidden();
+    await expect(ai(page)).toContainText("META LIVE");
+    // the stale answer ("locked") arrives now, after the newer one
+    await slow;
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
+    expect(await lab.mission((s) => s.system?.live.unlocked)).toBe(true);
+    await expect(ai(page)).toContainText("META LIVE");
+    expect(await stored(page)).toBe(PASSCODE);
+    // the same the other way round: a read that carried the passcode, landing after a re-lock, must not show unlocked
+    m.delay = (sent) => (sent === PASSCODE ? 2500 : 0);
+    const slowUnlocked = page.waitForResponse((r) => r.url().endsWith("/api/system/status") && r.request().headers()["x-aqua-passcode"] === PASSCODE);
+    await page.evaluate(() => void window.__missionStore!.getState().refreshStatus());
+    await page.evaluate(() => window.__missionStore!.getState().relock());
+    await expect(ai(page)).toContainText("LIVE LOCKED");
+    await slowUnlocked;
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
+    expect(await lab.mission((s) => s.system?.live.unlocked)).toBe(false);
+    await expect(ai(page)).toContainText("LIVE LOCKED");
+  });
+
   test("the system card labels a locked provider as locked, not offline", async ({ lab, page }) => {
     await mockBackend(page);
     await lab.openOnline();
@@ -412,7 +513,10 @@ test.describe("header fit", () => {
       await mockBackend(page, init as Partial<Mock>);
       await lab.openOnline();
       const bad: string[] = [];
-      for (const w of [...Array.from({ length: 70 }, (_, i) => 320 + i * 20), 1920, 2200, 2560]) {
+      // every 20 px, plus the pixel either side of every breakpoint the header uses (a pair of show/hide classes that disagree by
+      // one shows both or neither at exactly that width)
+      const edges = [380, 440, 520, 600, 760, 1000, 1100, 1200, 1280, 1440, 1600].flatMap((n) => [n - 1, n, n + 1]);
+      for (const w of [...Array.from({ length: 70 }, (_, i) => 320 + i * 20), ...edges, 1920, 2200, 2560]) {
         await page.setViewportSize({ width: w, height: 800 });
         await page.waitForTimeout(40);
         bad.push(...(await headerProblems(page)).map((p) => `${w}px: ${p}`));
@@ -429,7 +533,6 @@ test.describe("header fit", () => {
     [1440, 900],
     [2560, 1440],
   ] as const;
-  const shots = process.env.CREDITS_SHOTS;
 
   for (const [w, h] of WIDTHS) {
     for (const mode of ["ok", "locked", "exhausted"] as const) {
@@ -441,7 +544,6 @@ test.describe("header fit", () => {
         const overflow = () => page.evaluate(() => ({ doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, body: document.body.scrollWidth - document.body.clientWidth }));
         expect(await overflow()).toEqual({ doc: 0, body: 0 });
         expect(await headerProblems(page)).toEqual([]);
-        if (shots) await page.screenshot({ path: `${shots}/header-${w}-${mode}.png`, clip: { x: 0, y: 0, width: w, height: 64 } });
 
         await chip(page).click();
         const pop = (await page.getByTestId("credits-popover").boundingBox())!;
@@ -449,7 +551,6 @@ test.describe("header fit", () => {
         expect(pop.x + pop.width, "popover right").toBeLessThanOrEqual(w + 0.5);
         expect(pop.y + pop.height, "popover bottom").toBeLessThanOrEqual(h);
         expect(await overflow()).toEqual({ doc: 0, body: 0 });
-        if (shots) await page.screenshot({ path: `${shots}/popover-${w}-${mode}.png` });
         await page.keyboard.press("Escape");
 
         if (mode === "locked") {
@@ -464,7 +565,6 @@ test.describe("header fit", () => {
           expect(d.y).toBeGreaterThanOrEqual(0);
           expect(d.y + d.height).toBeLessThanOrEqual(h);
           expect(await overflow()).toEqual({ doc: 0, body: 0 });
-          if (shots) await page.screenshot({ path: `${shots}/dialog-${w}.png` });
         }
       });
     }
