@@ -37,7 +37,7 @@ function liveList(captureIds: string[], patch: Partial<WorkOrdersResponse> = {})
     { id: "WO-02", priority: "P3", title: "Fetch the dropped wrench", location: { x: 85, y: 9 }, evidence: [captureIds[1]], action: "Retrieve the wrench from the far corner.", effort: "S", rationale: "Seen once near the tank wall." },
   ];
   return {
-    orders, provider: "MUSE_SPARK", model: "muse-spark-1.3", executionIds: ["exe_aaaaaaaaaaaa"], classification: "LIVE_META", fallback: null, note: "", droppedEvidence: ["cap_deadbeef0001"], droppedOrders: 1, language: "en", ...patch,
+    orders, provider: "MUSE_SPARK", model: "muse-spark-1.3", executionIds: ["exe_aaaaaaaaaaaa"], requestsSent: 1, classification: "LIVE_META", fallback: null, note: "", droppedEvidence: ["cap_deadbeef0001"], droppedOrders: 1, language: "en", ...patch,
   };
 }
 
@@ -174,7 +174,7 @@ test.describe("Work orders", () => {
     await expect(page.getByTestId("workorders-badges")).toContainText("MUSE SPARK 1.3");
     await expect(page.getByTestId("workorders-badges").locator("[data-exec]")).toHaveAttribute("data-exec", "LIVE_META");
     await expect(page.getByTestId("workorders-badges")).not.toContainText("OFFLINE");
-    await expect(panel(page)).toContainText("1 Meta request logged / 1 order dropped: 1 cited capture no record holds");
+    await expect(panel(page)).toContainText("1 sent to Meta / 1 order dropped: 1 cited capture no record holds");
     await expect(cards(page).nth(0)).toHaveAttribute("data-priority", "P1");
     await expect(cards(page).nth(1)).toHaveAttribute("data-priority", "P3");
     await expect(cards(page).nth(0).locator("h4")).not.toHaveAttribute("lang", "hi");
@@ -196,7 +196,7 @@ test.describe("Work orders", () => {
     await lab.openOnline();
     const mission = await seedMission(page);
     const locked = liveList(mission.captureIds, {
-      provider: "OFFLINE_RULES", model: null, executionIds: [], classification: null, fallback: "LIVE_LOCKED", droppedEvidence: [], droppedOrders: 0,
+      provider: "OFFLINE_RULES", model: null, executionIds: [], requestsSent: 0, classification: null, fallback: "LIVE_LOCKED", droppedEvidence: [], droppedOrders: 0,
       note: "Live mode is locked: the offline rules wrote the orders, not Muse Spark.",
     });
     await page.route("**/api/inspection/*/work-orders", (route) => route.fulfill({ json: locked, headers: CORS }));

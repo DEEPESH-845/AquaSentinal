@@ -63,6 +63,12 @@ export function HindiNeedsMeta({ offline, className }: { offline: boolean; class
 const DOT_BG = { teal: "bg-teal", amber: "bg-amber", danger: "bg-danger", dim: "bg-dim" } as const;
 
 /** Status dot. `pulse` marks a live heartbeat (a dependency answering right now), never a decoration. */
+/** How many logged executions actually went to Meta; the rest are cache replays that sent nothing. */
+export function SentToMeta({ sent, logged }: { sent: number; logged: number }) {
+  const replayed = Math.max(0, logged - sent);
+  return <>{` / ${sent} sent to Meta${replayed > 0 ? `, ${replayed} replayed from cache` : ""}`}</>;
+}
+
 export function Dot({ tone, pulse }: { tone: keyof typeof DOT_BG; pulse?: boolean }) {
   return (
     <span className="relative inline-flex h-1.5 w-1.5 shrink-0">

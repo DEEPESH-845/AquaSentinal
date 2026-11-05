@@ -11,7 +11,7 @@ import { C } from "@/lib/theme";
 import { FALLBACK_TAG } from "./ask";
 import { FOCUSABLE, usd } from "./credits";
 import { ExecTag } from "./intelligence";
-import { Btn, SourceTag } from "./shared";
+import { Btn, SentToMeta, SourceTag } from "./shared";
 
 /**
  * Real water: one frame from the device camera (or an image file) goes to SAM 3.1 through POST /api/ai/segment-image, and the masks are
@@ -229,8 +229,6 @@ function Result({ shot, onUnlock }: { shot: Shot; onUnlock: () => void }) {
   }
   const answered = r.provider === "SAM_3_1";
   const why = answered ? null : FALLBACK_TAG[failedWhy(r)];
-  // executionIds also holds the cache replays (each is an execution record of its own); only requestsSent went to Meta
-  const replayed = Math.max(0, r.executionIds.length - r.requestsSent);
   return (
     <div className="mt-2" data-testid="realcam-result" data-provider={r.provider} data-class={r.classification ?? undefined}>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -246,7 +244,7 @@ function Result({ shot, onUnlock }: { shot: Shot; onUnlock: () => void }) {
         </span>
         <span className="value text-[10px] text-dim" data-testid="realcam-stats">
           {answered ? `latency ${ms(r.latencyMs)} / cost ${usd(r.costUsd, 4)}` : "no mask drawn"}
-          {` / ${r.requestsSent} sent to Meta${replayed > 0 ? `, ${replayed} replayed from cache` : ""}`}
+          <SentToMeta sent={r.requestsSent} logged={r.executionIds.length} />
         </span>
       </div>
       <ul className="mt-1.5 border-t border-line">

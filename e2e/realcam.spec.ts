@@ -278,7 +278,7 @@ test.describe("Real water camera", () => {
 
   test("locked: the same label with LIVE LOCKED, and a way in to the passcode", async ({ lab, page }) => {
     await mockProviders(page, "LIVE_LOCKED");
-    await mockSegment(page, () => ({ ...liveAnswer([]), segments: [], provider: "UNAVAILABLE", model: null, executionIds: [], classification: null, latencyMs: null, costUsd: 0, fallback: "LIVE_LOCKED", note: "locked" }));
+    await mockSegment(page, () => ({ ...liveAnswer([]), segments: [], provider: "UNAVAILABLE", model: null, executionIds: [], requestsSent: 0, classification: null, latencyMs: null, costUsd: 0, fallback: "LIVE_LOCKED", note: "locked" }));
     await lab.openOnline();
     await openPanel(page);
     await expect(page.getByTestId("realcam-provider")).toHaveAttribute("data-status", "LIVE_LOCKED");

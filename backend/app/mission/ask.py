@@ -352,6 +352,14 @@ def _classify(executions: list[dict[str, Any]]) -> str | None:
     return next((c for c in ("MOCKED", "CACHED_MOCKED", "CACHED_UNVERIFIED", "LIVE_META", "CACHED_LIVE") if c in seen), None)
 
 
+# Execution classes of a request that left for Meta, answered or not. A cache replay is an execution record too, but nothing was sent.
+SENT = ("LIVE_META", "LIVE_META_FAILED")
+
+
+def requests_sent(executions: list[dict[str, Any]]) -> int:
+    return sum(e["classification"] in SENT for e in executions)
+
+
 class AskService:
     def __init__(self, repo: Repository, spark: Spark | None):
         self.repo = repo
@@ -380,7 +388,7 @@ class AskService:
             except (TypeError, AttributeError, KeyError) as e:  # a malformed model reply (tool_calls or arguments of the wrong shape)
                 fallback, note = "LIVE_META_FAILED", f"{NOTES['LIVE_META_FAILED']} (malformed reply: {type(e).__name__})"
         log.info("ask fell back to the offline records query", extra={"mission": mission_id, "fallback": fallback})
-        return await self._offline(mission, question, fallback, note, [e["id"] for e in executions], tried)
+        return await self._offline(mission, question, fallback, note, executions, tried)
 
     async def _live(self, mission: MissionRecord, question: str, language: Language, executions: list[dict[str, Any]], records: list[ToolCallRecord]) -> AskResponse:
         assert self.spark is not None
@@ -425,11 +433,12 @@ class AskService:
             answer, cited, dropped = link_citations(text, citable)
             return AskResponse(
                 answer=answer, citations=[citable[c] for c in cited], tool_calls=records, provider="MUSE_SPARK", model=self.spark.model,
-                execution_ids=[e["id"] for e in executions], classification=_classify(executions), fallback=None, note="", dropped_citations=dropped, language=language,
+                execution_ids=[e["id"] for e in executions], requests_sent=requests_sent(executions), classification=_classify(executions), fallback=None, note="",
+                dropped_citations=dropped, language=language,
             )
         raise NoAnswer(f"no answer after {MAX_ASK_TURNS} turns")  # not reachable: the last turn returns or raises
 
-    async def _offline(self, mission: MissionRecord, question: str, fallback: AskFallback, note: str, execution_ids: list[str], tried: list[ToolCallRecord]) -> AskResponse:
+    async def _offline(self, mission: MissionRecord, question: str, fallback: AskFallback, note: str, executions: list[dict[str, Any]], tried: list[ToolCallRecord]) -> AskResponse:
         tools = AskTools(self.repo, mission)
         registry = tools.registry()
         records = list(tried)
@@ -443,6 +452,7 @@ class AskService:
         citable = tools.citable()
         answer, cited, dropped = link_citations(text, citable)
         return AskResponse(
-            answer=answer, citations=[citable[c] for c in cited], tool_calls=records, provider="OFFLINE_RECORDS_QUERY", model=None, execution_ids=execution_ids,
+            answer=answer, citations=[citable[c] for c in cited], tool_calls=records, provider="OFFLINE_RECORDS_QUERY", model=None,
+            execution_ids=[e["id"] for e in executions], requests_sent=requests_sent(executions),
             classification=None, fallback=fallback, note=note, dropped_citations=dropped, language="en",
         )

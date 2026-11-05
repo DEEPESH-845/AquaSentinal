@@ -11,15 +11,12 @@ import hashlib
 
 from ..meta.client import MetaAPIError, MetaBudgetExceeded, collect_executions
 from ..meta.sam import Sam
-from ..mission.ask import _classify
+from ..mission.ask import _classify, requests_sent
 from ..schemas import MAX_REAL_PROMPTS, RealInstance, RealSegment, RealSegmentResponse
 from .pipeline import mask_polygons
 from .quality import decode
 
 MAX_PROMPT_CHARS = 60  # the same limit as SegmentRequest
-
-# Execution classes of a request that left for Meta, answered or not. A cache replay is an execution record too, but nothing was sent.
-SENT = ("LIVE_META", "LIVE_META_FAILED")
 
 NOTES = {
     "NO_KEY": "SAM 3.1 needs the Meta key: no MODEL_API_KEY is set, so no mask was drawn.",
@@ -72,7 +69,7 @@ async def segment_image(sam: Sam | None, jpeg: bytes, size: tuple[int, int], pro
     latencies = [s.latency_ms for s in segments if s.latency_ms is not None]
     return RealSegmentResponse(
         width=width, height=height, segments=list(segments), provider="SAM_3_1" if answered else "UNAVAILABLE", model=sam.model,
-        execution_ids=[e["id"] for e in executions], requests_sent=sum(e["classification"] in SENT for e in executions), classification=_classify([e for e in executions if e["success"]]), latency_ms=max(latencies, default=None),
+        execution_ids=[e["id"] for e in executions], requests_sent=requests_sent(executions), classification=_classify([e for e in executions if e["success"]]), latency_ms=max(latencies, default=None),
         cost_usd=round(sum(e.get("costUsd") or 0.0 for e in executions if e["classification"] == "LIVE_META"), 6), fallback=None,
         note="" if answered else next((s.error for s in segments if s.error), ""),
     )

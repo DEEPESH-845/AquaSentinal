@@ -158,7 +158,7 @@ def test_offline_intents_answer_from_the_records_with_citations_and_no_model(set
         def offline(question: str, **kw) -> dict:
             r = ask(c, mid, question, **kw)
             assert r["provider"] == "OFFLINE_RECORDS_QUERY" and r["model"] is None and r["fallback"] == "NO_KEY" and r["classification"] is None
-            assert r["executionIds"] == [] and r["droppedCitations"] == [] and r["language"] == "en"
+            assert r["executionIds"] == [] and r["requestsSent"] == 0 and r["droppedCitations"] == [] and r["language"] == "en"
             assert "cap_" not in r["answer"], "ids become numbered markers"
             assert {x["captureId"] for x in r["citations"]} <= valid
             assert all(t["phase"] == "ASK" and t["by"] == "OFFLINE_RECORDS_QUERY" and t["name"] in ASK_TOOLS for t in r["toolCalls"])

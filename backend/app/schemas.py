@@ -412,6 +412,8 @@ class AskResponse(Wire):
     model: str | None
     # every Meta execution this answer cost or replayed, so the log can be checked against it (also when a fallback answered)
     execution_ids: list[str]
+    # how many of those were requests that actually went to Meta (LIVE_META or LIVE_META_FAILED); the rest were replayed from the cache
+    requests_sent: int
     # how the Meta calls behind a MUSE_SPARK answer were made: LIVE_META, CACHED_LIVE, MOCKED ... None for an offline answer
     classification: str | None
     fallback: AskFallback | None
@@ -463,6 +465,8 @@ class WorkOrdersResponse(Wire):
     model: str | None
     # every Meta execution this list cost or replayed, also when a fallback produced it
     execution_ids: list[str]
+    # how many of those were requests that actually went to Meta (LIVE_META or LIVE_META_FAILED); the rest were replayed from the cache
+    requests_sent: int
     # how the Meta call behind a MUSE_SPARK list was made: LIVE_META, CACHED_LIVE, MOCKED ... None for an offline list
     classification: str | None
     # why the offline rules wrote the list instead of Muse Spark. None when Muse Spark wrote it (or there was nothing to order)

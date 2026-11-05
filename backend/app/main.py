@@ -275,12 +275,12 @@ def create_app(settings: Settings | None = None, *, meta_transport=None, serial_
         request: Request, audio: UploadFile = File(...), input_source: str = Form("LIVE_MICROPHONE", alias="inputSource"), language: Language = Form("en"), live: bool = Depends(live_access)
     ):
         s = S(request)
-        if not live:
-            raise LiveLocked()
         if input_source not in ("LIVE_MICROPHONE", "RECORDED_INPUT"):
             raise HTTPException(422, "inputSource must be LIVE_MICROPHONE or RECORDED_INPUT")
-        if s.voice is None:
+        if s.voice is None:  # before the lock: unlocking cannot help without a key
             raise HTTPException(503, "Muse Voice Transcribe is unavailable: MODEL_API_KEY is not configured. Type the instruction instead.")
+        if not live:
+            raise LiveLocked()
         data = await audio.read(MAX_AUDIO_BYTES + 1)
         if not data or len(data) > MAX_AUDIO_BYTES:
             raise HTTPException(413, "audio missing or larger than 10 MB (about five minutes)")

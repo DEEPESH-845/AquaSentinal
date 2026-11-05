@@ -12,7 +12,7 @@ import { useSimStore } from "@/lib/sim/store";
 import { useMissionStore, type AskView } from "@/lib/store/mission";
 import { ExecTag } from "./intelligence";
 import { LANGUAGES, VoiceButton } from "./mission";
-import { Btn, HindiNeedsMeta, Segmented, SourceTag, f1, human } from "./shared";
+import { Btn, HindiNeedsMeta, Segmented, SentToMeta, SourceTag, f1, human } from "./shared";
 
 const SUGGESTED = ["Where is the loose cable?", "How many objects were found?", "How confident is the detection?"];
 /** A citation points at the twin object of its class nearest to its position, if one lies this close (gantry cm). */
@@ -212,7 +212,7 @@ function Answer({ a, report }: { a: AskView; report: InspectionReport }) {
             ) : (
               "no tools called"
             )}
-            {r.executionIds.length > 0 && ` / ${r.executionIds.length} Meta request${r.executionIds.length === 1 ? "" : "s"} logged`}
+            {r.executionIds.length > 0 && <SentToMeta sent={r.requestsSent} logged={r.executionIds.length} />}
             {r.droppedCitations.length > 0 && <span className="text-amber"> / {r.droppedCitations.length} uncited id{r.droppedCitations.length === 1 ? "" : "s"} dropped</span>}
           </p>
         </div>
@@ -280,7 +280,7 @@ export function AskCard({ report }: { report: InspectionReport }) {
           </button>
         ))}
       </div>
-      {backend === "OFFLINE" && <p className="mt-1 text-[11px] text-amber">Backend offline: questions are answered from the records it stores.</p>}
+      {backend === "OFFLINE" && <p className="mt-1 text-[11px] text-amber">Backend offline: questions need the backend, which holds this mission&apos;s records.</p>}
       <span className="sr-only" role="status">
         {pending ? "Reading the records" : ""}
       </span>

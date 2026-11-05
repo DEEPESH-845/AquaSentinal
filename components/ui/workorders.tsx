@@ -11,7 +11,7 @@ import { useMissionStore } from "@/lib/store/mission";
 import { FALLBACK_TAG } from "./ask";
 import { ExecTag } from "./intelligence";
 import { LANGUAGES } from "./mission";
-import { Btn, HindiNeedsMeta, Segmented, f1 } from "./shared";
+import { Btn, HindiNeedsMeta, Segmented, SentToMeta, f1 } from "./shared";
 
 const PRIORITY: Record<WorkOrderPriority, { word: string; tone: string; edge: string }> = {
   P1: { word: "Act first", tone: "border-danger/70 text-danger", edge: "border-l-danger" },
@@ -237,7 +237,7 @@ export function WorkOrdersCard({ report }: { report: InspectionReport }) {
           {r.note && r.fallback !== "NO_KEY" && <p className="mt-1 text-[10px] leading-snug text-dim">{r.note}</p>}
           <p className="value mt-1 text-[10px] leading-snug text-dim">
             {r.provider === "MUSE_SPARK" ? "written from the stored tracks" : "written from the rule table"}
-            {r.executionIds.length > 0 && ` / ${r.executionIds.length} Meta request${r.executionIds.length === 1 ? "" : "s"} logged`}
+            {r.executionIds.length > 0 && <SentToMeta sent={r.requestsSent} logged={r.executionIds.length} />}
             {r.droppedOrders > 0 && (
               <span className="text-amber">
                 {" "}

@@ -125,6 +125,8 @@ export interface AskResponse {
   model: string | null;
   /** every Meta execution behind the answer, also when a fallback answered after a call failed */
   executionIds: string[];
+  /** executions that actually went to Meta; the rest of executionIds were replayed from the cache */
+  requestsSent: number;
   /** how the Meta calls behind a MUSE_SPARK answer were made; null for an offline answer */
   classification: ModelExecution["classification"] | null;
   fallback: AskFallback | null;
@@ -154,6 +156,8 @@ export interface WorkOrdersResponse {
   model: string | null;
   /** every Meta execution behind the list, also when the offline rules wrote it after a call failed */
   executionIds: string[];
+  /** executions that actually went to Meta; the rest of executionIds were replayed from the cache */
+  requestsSent: number;
   /** how the Meta call behind a MUSE_SPARK list was made; null for an offline list */
   classification: ModelExecution["classification"] | null;
   /** why the offline rules wrote the list; null when Muse Spark wrote it (or there was nothing to order) */

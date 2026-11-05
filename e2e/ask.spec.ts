@@ -45,6 +45,7 @@ function liveAnswer(captureIds: string[], patch: Partial<AskResponse> = {}): Ask
     provider: "MUSE_SPARK",
     model: "muse-spark-1.3",
     executionIds: ["exe_aaaaaaaaaaaa", "exe_bbbbbbbbbbbb", "exe_cccccccccccc"],
+    requestsSent: 2,
     classification: "LIVE_META",
     fallback: null,
     note: "",
@@ -76,7 +77,7 @@ test.describe("Ask the inspector", () => {
     await expect(first.getByTestId("ask-badges")).toHaveText("OFFLINE RECORDS QUERY");
     await expect(first).not.toContainText("cap_");
     await expect(first).toContainText("tools: list_observations, get_track");
-    await expect(first).not.toContainText("Meta request");
+    await expect(first).not.toContainText("sent to Meta");
 
     // the citation has the stored frame as its thumbnail, loaded from the backend
     const chip = first.getByTestId("ask-citation");
@@ -161,7 +162,7 @@ test.describe("Ask the inspector", () => {
     await expect(a.getByTestId("ask-badges")).toContainText("MUSE SPARK 1.3");
     await expect(a.getByTestId("ask-badges").locator("[data-exec]")).toHaveAttribute("data-exec", "LIVE_META");
     await expect(a.getByTestId("ask-badges")).not.toContainText("OFFLINE");
-    await expect(a).toContainText("tools: list_observations, get_track / 3 Meta requests logged / 1 uncited id dropped");
+    await expect(a).toContainText("tools: list_observations, get_track / 2 sent to Meta, 1 replayed from cache / 1 uncited id dropped");
     await expect(panel(page).getByTestId("hindi-needs-meta")).toHaveCount(0);
     await expect(a.getByTestId("ask-answer-text")).not.toHaveAttribute("lang", "hi");
 
@@ -218,6 +219,7 @@ test.describe("Ask the inspector", () => {
       provider: "OFFLINE_RECORDS_QUERY",
       model: null,
       executionIds: [],
+      requestsSent: 0,
       classification: null,
       fallback: "LIVE_LOCKED",
       note: "Live mode is locked: the offline records query answered, not Muse Spark.",

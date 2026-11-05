@@ -112,7 +112,7 @@ What a key unlocks is listed under "What still needs the key" below.
 
 - Every `LIVE_META` execution: none exists yet, so Stage One item 5 in docs/JUDGING_READINESS.md stays open.
 - The wire format of the features added on this branch against the real service: Spark structured output for work orders, Spark tool loops for Ask, SAM 3.1 on photographs of real water, Hindi `languageBias`.
-- Any real latency, cost or mask-quality figure; the credit chip shows `$0.000` of the budget until a live call is made.
+- Any real latency, cost or mask-quality figure; with no key the credit chip reads NO KEY, and with a key it shows `$0.000` of the budget until a live call is made.
 - A recording of a live run for judges: not built on this branch.
 - The murk benchmark, the live recorder, the `/proof` page and replay were planned and not built; nothing in the product or docs claims them.
 

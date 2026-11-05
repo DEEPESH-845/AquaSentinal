@@ -22,7 +22,7 @@ from ..meta.client import MetaAPIError, MetaBudgetExceeded, collect_executions
 from ..meta.spark import Spark, _json_content, with_language
 from ..reporting import build_report
 from ..schemas import TRAVEL_X, TRAVEL_Y, AskFallback, Language, WorkOrder, WorkOrdersResponse
-from .ask import NoAnswer, _classify
+from .ask import NoAnswer, _classify, requests_sent
 from .service import MissionError
 
 log = logging.getLogger("aquasentinal.workorders")
@@ -166,7 +166,7 @@ class WorkOrderService:
             except NoAnswer as e:
                 fallback, note = "NO_ANSWER", f"{NOTES['NO_ANSWER']} ({e})"
         log.info("work orders fell back to the offline rules", extra={"mission": mission_id, "fallback": fallback})
-        return self._offline(tracks, fallback, note, [e["id"] for e in executions])
+        return self._offline(tracks, fallback, note, executions)
 
     async def _live(self, mission_id: str, report: dict[str, Any], tracks: list[dict[str, Any]], language: Language, executions: list[dict[str, Any]]) -> WorkOrdersResponse:
         assert self.spark is not None
@@ -192,13 +192,13 @@ class WorkOrderService:
         if not orders:
             raise NoAnswer(f"none of its {dropped} order(s) survived the checks" if dropped else "it wrote no orders")
         return WorkOrdersResponse(
-            orders=orders, provider="MUSE_SPARK", model=self.spark.model, execution_ids=[e["id"] for e in executions], classification=_classify(executions),
-            fallback=None, note="", dropped_evidence=unknown, dropped_orders=dropped, language=language,
+            orders=orders, provider="MUSE_SPARK", model=self.spark.model, execution_ids=[e["id"] for e in executions], requests_sent=requests_sent(executions),
+            classification=_classify(executions), fallback=None, note="", dropped_evidence=unknown, dropped_orders=dropped, language=language,
         )
 
     @staticmethod
-    def _offline(tracks: list[dict[str, Any]], fallback: AskFallback | None, note: str, execution_ids: list[str]) -> WorkOrdersResponse:
+    def _offline(tracks: list[dict[str, Any]], fallback: AskFallback | None, note: str, executions: list[dict[str, Any]]) -> WorkOrdersResponse:
         return WorkOrdersResponse(
-            orders=offline_orders(tracks), provider="OFFLINE_RULES", model=None, execution_ids=execution_ids, classification=None,
+            orders=offline_orders(tracks), provider="OFFLINE_RULES", model=None, execution_ids=[e["id"] for e in executions], requests_sent=requests_sent(executions), classification=None,
             fallback=fallback, note=note, dropped_evidence=[], dropped_orders=0, language="en",
         )

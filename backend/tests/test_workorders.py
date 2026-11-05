@@ -158,7 +158,7 @@ def test_live_orders_come_from_one_structured_output_call_and_are_grounded_logge
 
         # the log holds exactly this call, classified from the transport; a mock reads as MOCKED, never LIVE_META
         log = [e for e in c.get("/api/evidence/model-executions").json()["executions"] if e["operation"] == "work_orders"]
-        assert [e["id"] for e in log] == r["executionIds"] and r["classification"] == "MOCKED" and log[0]["inputRef"] == f"workorders:mission={mid} lang=en"
+        assert [e["id"] for e in log] == r["executionIds"] and r["classification"] == "MOCKED" and r["requestsSent"] == 0 and log[0]["inputRef"] == f"workorders:mission={mid} lang=en"
 
         # the same records again are replayed from the cache: no request, and the list says so
         again = orders(c, mid)
@@ -248,7 +248,7 @@ def test_a_failed_meta_call_falls_back_and_says_so(settings, live_settings, meta
         meta.add("/chat/completions", httpx.Response(400, json={"error": {"message": "bad request", "type": "invalid_request_error", "code": "bad"}}))
         r = orders(c, mid)
         assert r["provider"] == "OFFLINE_RULES" and r["fallback"] == "LIVE_META_FAILED" and "(400 bad)" in r["note"] and len(r["orders"]) == 2
-        assert len(r["executionIds"]) == 1 and r["classification"] is None
+        assert len(r["executionIds"]) == 1 and r["classification"] is None and r["requestsSent"] == 0
 
 
 def test_a_mission_without_observations_makes_no_request_and_orders_nothing(live_settings, meta):
