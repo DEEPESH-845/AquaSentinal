@@ -93,3 +93,9 @@ All bodies are JSON in camelCase unless noted; unknown fields are rejected.
 - `useSimStore` (`lib/sim/store.ts`) is the twin: engine, 20 Hz snapshot, scene and demo state.
 - `useMissionStore` (`lib/store/mission.ts`) holds everything that crosses the network: backend status, the mission record, captures and their results, reports, history.
 - `BackendBridge` polls status every 5 s, holds the event socket, posts finished twin missions and requests the demo plan.
+- The live-mode passcode is held by `lib/api/client.ts`: in `sessionStorage` (this tab only, never the URL or `localStorage`) with an in-memory copy for browsers that block storage, and sent as `X-Aqua-Passcode` on every API request.
+  The backend counts a wrong passcode as a failed attempt, so the client forgets it as soon as the status read shows the lock refused it, or a model route answers 403 `live mode locked`, and then stops sending it.
+  Overlapping status reads share one request so a stale passcode costs one attempt, not several.
+  A 429 on any other route is Meta rate limiting the backend and does not touch the passcode.
+- `components/ui/credits.tsx` holds the header credit chip with its popover and the unlock dialog.
+  Every figure comes from the `credits` object of the status; below 600 px the AI chip is not drawn, so the lock is managed from the credit popover.
