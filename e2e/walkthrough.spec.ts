@@ -9,6 +9,7 @@ declare global {
 }
 
 const HEADINGS = [
+  /the need of the hour/i,
   /the deeper the inspection/i,
   /a camera gantry over a pipeline/i,
   /from a sentence to a bounded mission/i,
@@ -27,17 +28,17 @@ async function openWalkthrough(page: Page) {
 }
 
 test.describe("walkthrough", () => {
-  test("renders all seven sections", async ({ page, audit }) => {
+  test("renders all eight sections", async ({ page, audit }) => {
     void audit;
     await openWalkthrough(page);
     for (const h of HEADINGS) await expect(page.getByRole("heading", { name: h })).toBeAttached();
   });
 
-  test("section 05 drives the twin's turbidity by scroll and by the range input", async ({ page, audit }) => {
+  test("section 06 drives the twin's turbidity by scroll and by the range input", async ({ page, audit }) => {
     void audit;
     await openWalkthrough(page);
     const before = await turbidity(page);
-    // into the pinned/scrubbed range of section 05
+    // into the pinned/scrubbed range of section 06
     await page.evaluate(() => {
       const el = document.getElementById("adaptive")!;
       const top = (el.closest(".pin-spacer") ?? el).getBoundingClientRect().top + window.scrollY;
